@@ -1,0 +1,32 @@
+# Notes
+
+## OpenTracing
+
+- Spec: https://opentracing.io/specification/
+
+## LightStep API
+
+- Can't find any documentation.
+- Preferred and default option by the Python and Go LightStep tracers is a
+  Protocol Buffers over HTTP approach.
+- LightStep Protocol Buffer files: https://github.com/lightstep/lightstep-tracer-common
+  These seem to depend on https://github.com/googleapis/googleapis.git in some way
+
+
+## Jaeger API
+
+- Can't find any documentation either...
+- Uses thrift via UDP or HTTP
+- rustracing_jaeger is either implementing a lot of thrift by hand or parts of
+  the code are generated code that has been committed to the repository without
+  instructions on how to re-generate the code. I don't think there is much
+  that can or should be learned from that
+- Jaeger thrift files can be found here https://github.com/jaegertracing/jaeger-idl/tree/6710b74a8559dfba9773f972619d2a8cd80178f2
+- Apache Thrift has Rust support https://github.com/apache/thrift/tree/master/lib/rs
+- Apache Thrift Rust tutorial https://github.com/apache/thrift/tree/master/tutorial/rs
+
+
+## Rust Protocol Buffers
+
+- https://github.com/danburkert/prost seems to be the best option, chosen by
+  Mozilla, very actively maintained
