@@ -33,6 +33,12 @@ impl From<String> for Value {
     }
 }
 
+impl From<&str> for Value {
+    fn from(value: &str) -> Self {
+        Value::String(value.to_owned())
+    }
+}
+
 impl From<bool> for Value {
     fn from(value: bool) -> Self {
         Value::Bool(value)
@@ -262,7 +268,7 @@ impl<S: SpanContextState + Clone> SpanBuilder<S> {
         }
     }
 
-    pub fn child_of(&mut self, span_context: &SpanContext<S>) -> &mut Self {
+    pub fn child_of(mut self, span_context: &SpanContext<S>) -> Self {
         self.references.push(Reference {
             rtype: ReferenceType::ChildOf,
             to: span_context.clone(),
@@ -270,7 +276,7 @@ impl<S: SpanContextState + Clone> SpanBuilder<S> {
         self
     }
 
-    pub fn follows_from(&mut self, span_context: &SpanContext<S>) -> &mut Self {
+    pub fn follows_from(mut self, span_context: &SpanContext<S>) -> Self {
         self.references.push(Reference {
             rtype: ReferenceType::FollowsFrom,
             to: span_context.clone(),
@@ -278,12 +284,12 @@ impl<S: SpanContextState + Clone> SpanBuilder<S> {
         self
     }
 
-    pub fn set_start_timestamp(&mut self, start_timestamp: SystemTime) -> &mut Self {
+    pub fn set_start_timestamp(mut self, start_timestamp: SystemTime) -> Self {
         self.start_timestamp = Some(start_timestamp);
         self
     }
 
-    pub fn set_tag<K: Into<Key>, V: Into<Value>>(&mut self, key: K, value: V) -> &mut Self {
+    pub fn set_tag<K: Into<Key>, V: Into<Value>>(mut self, key: K, value: V) -> Self {
         self.tags.insert(key.into(), value.into());
         self
     }

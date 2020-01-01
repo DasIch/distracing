@@ -7,5 +7,9 @@ extern crate prost;
 #[cfg(feature = "lightstep")]
 extern crate prost_types;
 
-pub mod api;
-pub mod tracers;
+pub use api::Tracer;
+pub use tracers::global::{set_tracer, tracer};
+pub use tracers::noop::NoopTracer;
+
+mod api;
+mod tracers;
