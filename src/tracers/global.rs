@@ -3,7 +3,7 @@ use crate::tracers::noop::NoopTracer;
 use std::sync::{Arc, RwLock};
 
 #[derive(Clone)]
-struct BoxedSpanContextState(Box<dyn SpanContextState>);
+pub struct BoxedSpanContextState(Box<dyn SpanContextState>);
 
 impl SpanContextState for BoxedSpanContextState {}
 
@@ -41,6 +41,14 @@ impl GlobalTracer {
         GlobalTracer {
             tracer: Box::new(generic_tracer),
         }
+    }
+}
+
+impl Tracer for GlobalTracer {
+    type SpanContextState = BoxedSpanContextState;
+
+    fn new_span_context_state(&self) -> Self::SpanContextState {
+        self.tracer.new_span_context_state()
     }
 }
 
