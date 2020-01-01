@@ -124,17 +124,6 @@ impl From<isize> for Value {
 }
 
 #[derive(Clone, Debug)]
-pub enum ReferenceType {
-    ChildOf,
-    FollowsFrom,
-}
-
-pub struct Reference<SC: SpanContext> {
-    pub rtype: ReferenceType,
-    pub to: SC,
-}
-
-#[derive(Clone, Debug)]
 pub struct Event {
     key: Key,
     value: Value,
@@ -153,86 +142,174 @@ impl Event {
     }
 }
 
-pub trait SpanContext: Clone {
-    // The OpenTracing specification calls for being able to iterate through all baggage items.
-    // I don't see a reason to restrict it just to that, it would only add unnecessary complexity
-    fn baggage_items(&self) -> &HashMap<Key, String>;
+pub trait SpanContextState: SpanContextClone {}
+
+pub trait SpanContextClone {
+    fn clone_box(&self) -> Box<dyn SpanContextState>;
 }
 
-pub trait Span: Sized {
-    type SpanContext: SpanContext;
-    type FinishedSpan: FinishedSpan;
+impl<T: 'static + SpanContextState + Clone> SpanContextClone for T {
+    fn clone_box(&self) -> Box<dyn SpanContextState> {
+        Box::new(self.clone())
+    }
+}
 
-    fn span_context(&self) -> &Self::SpanContext;
+impl Clone for Box<dyn SpanContextState> {
+    fn clone(&self) -> Box<dyn SpanContextState> {
+        self.clone_box()
+    }
+}
 
-    fn set_operation_name(&mut self, new_operation_name: &str);
+#[derive(Clone)]
+pub struct SpanContext<S: SpanContextState> {
+    pub(crate) state: S,
+    pub baggage_items: HashMap<Key, String>,
+}
 
-    fn finish(self) -> Self::FinishedSpan {
+#[derive(Clone, Debug)]
+pub enum ReferenceType {
+    ChildOf,
+    FollowsFrom,
+}
+
+pub struct Reference<S: SpanContextState + Clone> {
+    pub rtype: ReferenceType,
+    pub to: SpanContext<S>,
+}
+
+pub struct Span<S: SpanContextState + Clone> {
+    span_context: SpanContext<S>,
+    pub(crate) start_timestamp: SystemTime,
+    pub(crate) operation_name: String,
+    pub(crate) references: Vec<Reference<S>>,
+    pub(crate) tags: HashMap<Key, Value>,
+    pub(crate) log: Vec<(SystemTime, Vec<Event>)>,
+}
+
+pub struct FinishedSpan<S: SpanContextState + Clone> {
+    pub(crate) span: Span<S>,
+    pub(crate) finish_timestamp: SystemTime,
+}
+
+impl<S: SpanContextState + Clone> FinishedSpan<S> {
+    pub fn span_context(&self) -> &SpanContext<S> {
+        &self.span.span_context
+    }
+}
+
+impl<S: SpanContextState + Clone> Span<S> {
+    pub fn span_context(&self) -> &SpanContext<S> {
+        &self.span_context
+    }
+
+    pub fn set_operation_name(&mut self, new_operation_name: &str) {
+        self.operation_name = new_operation_name.to_owned();
+    }
+
+    pub fn set_tag<K: Into<Key>, V: Into<Value>>(&mut self, key: K, value: V) {
+        self.tags.insert(key.into(), value.into());
+    }
+
+    pub fn log(&mut self, events: &[Event]) {
+        self.log_with_timestamp(events, SystemTime::now());
+    }
+
+    pub fn log_with_timestamp(&mut self, events: &[Event], timestamp: SystemTime) {
+        self.log.push((timestamp, events.to_vec()));
+    }
+
+    pub fn baggage_item<K: Into<Key>>(&self, key: K) -> Option<&str> {
+        self.span_context
+            .baggage_items
+            .get(&key.into())
+            .map(|v| v.as_str())
+    }
+
+    pub fn set_baggage_item<K: Into<Key>>(&mut self, key: K, value: &str) {
+        self.span_context
+            .baggage_items
+            .insert(key.into(), value.to_owned());
+    }
+
+    pub fn finish(self) -> FinishedSpan<S> {
         self.finish_with_timestamp(SystemTime::now())
     }
 
-    fn finish_with_timestamp(self, finish_timestamp: SystemTime) -> Self::FinishedSpan;
+    pub fn finish_with_timestamp(self, timestamp: SystemTime) -> FinishedSpan<S> {
+        FinishedSpan {
+            span: self,
+            finish_timestamp: timestamp,
+        }
+    }
+}
 
-    fn set_tag<K>(&mut self, key: K, value: String)
-    where
-        K: Into<Key>;
+pub struct SpanBuilder<S: SpanContextState + Clone> {
+    span_context: SpanContext<S>,
+    start_timestamp: Option<SystemTime>,
+    operation_name: String,
+    references: Vec<Reference<S>>,
+    tags: HashMap<Key, Value>,
+}
 
-    fn log_with_timestamp(&mut self, events: &[Event], timestamp: SystemTime);
-
-    fn log(&mut self, events: &[Event]) {
-        self.log_with_timestamp(events, SystemTime::now())
+impl<S: SpanContextState + Clone> SpanBuilder<S> {
+    pub(crate) fn new(span_context: SpanContext<S>, operation_name: &str) -> Self {
+        SpanBuilder {
+            span_context,
+            start_timestamp: None,
+            operation_name: operation_name.to_owned(),
+            references: vec![],
+            tags: HashMap::new(),
+        }
     }
 
-    fn set_baggage_item<K>(&mut self, key: K, value: String)
-    where
-        K: Into<Key>;
+    pub fn child_of(&mut self, span_context: &SpanContext<S>) -> &mut Self {
+        self.references.push(Reference {
+            rtype: ReferenceType::ChildOf,
+            to: span_context.clone(),
+        });
+        self
+    }
 
-    fn baggage_item<K>(&self, key: K) -> Option<&str>
-    where
-        K: Into<Key>;
+    pub fn follows_from(&mut self, span_context: &SpanContext<S>) -> &mut Self {
+        self.references.push(Reference {
+            rtype: ReferenceType::FollowsFrom,
+            to: span_context.clone(),
+        });
+        self
+    }
+
+    pub fn set_start_timestamp(&mut self, start_timestamp: SystemTime) -> &mut Self {
+        self.start_timestamp = Some(start_timestamp);
+        self
+    }
+
+    pub fn set_tag<K: Into<Key>, V: Into<Value>>(&mut self, key: K, value: V) -> &mut Self {
+        self.tags.insert(key.into(), value.into());
+        self
+    }
+
+    pub fn start(self) -> Span<S> {
+        Span {
+            span_context: self.span_context,
+            start_timestamp: self.start_timestamp.unwrap_or_else(SystemTime::now),
+            operation_name: self.operation_name,
+            references: self.references,
+            tags: self.tags,
+            log: vec![],
+        }
+    }
 }
 
-pub trait FinishedSpan {
-    type SpanContext: SpanContext;
+pub trait Tracer: Send + Sync {
+    type SpanContextState: SpanContextState + Clone;
 
-    fn span_context(&self) -> &Self::SpanContext;
-}
+    fn new_span_context_state(&self) -> Self::SpanContextState;
 
-pub trait SpanBuilder {
-    type SpanContext: SpanContext;
-    type Span: Span;
-
-    fn new(operation_name: &str) -> Self;
-
-    fn references(&mut self, references: &[Reference<Self::SpanContext>]) -> &mut Self;
-
-    fn child_of(&mut self, context: &Self::SpanContext) -> &mut Self;
-
-    fn follows_from(&mut self, context: &Self::SpanContext) -> &mut Self;
-
-    fn set_start_timestamp(&mut self, start_timestamp: SystemTime) -> &mut Self;
-
-    fn set_tag<K>(&mut self, key: K, value: String) -> &mut Self
-    where
-        K: Into<Key>;
-
-    fn start(self) -> Self::Span;
-}
-
-pub trait Tracer {
-    type SpanBuilder: SpanBuilder;
-
-    fn span(&self, operation_name: &str) -> Self::SpanBuilder;
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn create_event() {
-        Event::new("blasters", 123);
-        Event::new("frobnicating".to_owned(), true);
-        Event::new("foo", 123.456);
+    fn span(&self, operation_name: &str) -> SpanBuilder<Self::SpanContextState> {
+        let span_context = SpanContext {
+            state: self.new_span_context_state(),
+            baggage_items: HashMap::new(),
+        };
+        SpanBuilder::new(span_context, operation_name)
     }
 }

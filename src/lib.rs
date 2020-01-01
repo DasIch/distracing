@@ -1,3 +1,5 @@
+extern crate lazy_static;
+
 #[cfg(feature = "lightstep")]
 extern crate bytes;
 #[cfg(feature = "lightstep")]
