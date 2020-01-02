@@ -166,7 +166,7 @@ impl Clone for Box<dyn SpanContextState> {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct SpanContext<S: SpanContextState> {
     pub(crate) state: S,
     pub baggage_items: HashMap<Key, String>,
@@ -178,11 +178,13 @@ pub enum ReferenceType {
     FollowsFrom,
 }
 
+#[derive(Debug)]
 pub struct Reference<S: SpanContextState + Clone> {
     pub rtype: ReferenceType,
     pub to: SpanContext<S>,
 }
 
+#[derive(Debug)]
 pub struct Span<S: SpanContextState + Clone> {
     span_context: SpanContext<S>,
     pub(crate) start_timestamp: SystemTime,
@@ -192,6 +194,7 @@ pub struct Span<S: SpanContextState + Clone> {
     pub(crate) log: Vec<(SystemTime, Vec<Event>)>,
 }
 
+#[derive(Debug)]
 pub struct FinishedSpan<S: SpanContextState + Clone> {
     pub(crate) span: Span<S>,
     pub(crate) finish_timestamp: SystemTime,
