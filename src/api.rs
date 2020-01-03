@@ -1,5 +1,6 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::SystemTime;
 
 pub type Key = Cow<'static, str>;
@@ -187,16 +188,17 @@ pub enum ReferenceType {
     FollowsFrom,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Reference {
     pub rtype: ReferenceType,
     pub to: SpanContext,
 }
 
-#[derive(Debug)]
-pub struct Span {
-    span_context: SpanContext,
+#[derive(Clone, Debug)]
+pub struct SpanData {
+    pub(crate) span_context: SpanContext,
     pub(crate) start_timestamp: SystemTime,
+    pub(crate) finish_timestamp: Option<SystemTime>,
     pub(crate) operation_name: String,
     pub(crate) references: Vec<Reference>,
     pub(crate) tags: HashMap<Key, Value>,
@@ -204,28 +206,33 @@ pub struct Span {
 }
 
 #[derive(Debug)]
+pub struct Span {
+    data: SpanData,
+    reporter: Arc<dyn Reporter>,
+}
+
+#[derive(Debug)]
 pub struct FinishedSpan {
-    pub(crate) span: Span,
-    pub(crate) finish_timestamp: SystemTime,
+    pub(crate) data: SpanData,
 }
 
 impl FinishedSpan {
     pub fn span_context(&self) -> &SpanContext {
-        &self.span.span_context
+        &self.data.span_context
     }
 }
 
 impl Span {
     pub fn span_context(&self) -> &SpanContext {
-        &self.span_context
+        &self.data.span_context
     }
 
     pub fn set_operation_name(&mut self, new_operation_name: &str) {
-        self.operation_name = new_operation_name.to_owned();
+        self.data.operation_name = new_operation_name.to_owned();
     }
 
     pub fn set_tag<K: Into<Key>, V: Into<Value>>(&mut self, key: K, value: V) {
-        self.tags.insert(key.into(), value.into());
+        self.data.tags.insert(key.into(), value.into());
     }
 
     pub fn log(&mut self, events: &[Event]) {
@@ -233,18 +240,20 @@ impl Span {
     }
 
     pub fn log_with_timestamp(&mut self, events: &[Event], timestamp: SystemTime) {
-        self.log.push((timestamp, events.to_vec()));
+        self.data.log.push((timestamp, events.to_vec()));
     }
 
     pub fn baggage_item<K: Into<Key>>(&self, key: K) -> Option<&str> {
-        self.span_context
+        self.data
+            .span_context
             .baggage_items
             .get(&key.into())
             .map(|v| v.as_str())
     }
 
     pub fn set_baggage_item<K: Into<Key>>(&mut self, key: K, value: &str) {
-        self.span_context
+        self.data
+            .span_context
             .baggage_items
             .insert(key.into(), value.to_owned());
     }
@@ -253,16 +262,25 @@ impl Span {
         self.finish_with_timestamp(SystemTime::now())
     }
 
-    pub fn finish_with_timestamp(self, timestamp: SystemTime) -> FinishedSpan {
+    pub fn finish_with_timestamp(mut self, timestamp: SystemTime) -> FinishedSpan {
+        self.data.finish_timestamp = Some(timestamp);
         FinishedSpan {
-            span: self,
-            finish_timestamp: timestamp,
+            data: self.data.clone(),
         }
+    }
+}
+
+impl Drop for Span {
+    fn drop(&mut self) {
+        self.reporter.report(FinishedSpan {
+            data: self.data.clone(),
+        })
     }
 }
 
 pub struct SpanBuilder {
     span_context: SpanContext,
+    reporter: Arc<dyn Reporter>,
     start_timestamp: Option<SystemTime>,
     operation_name: String,
     references: Vec<Reference>,
@@ -270,9 +288,14 @@ pub struct SpanBuilder {
 }
 
 impl SpanBuilder {
-    pub(crate) fn new(span_context: SpanContext, operation_name: &str) -> Self {
+    pub(crate) fn new(
+        span_context: SpanContext,
+        reporter: Arc<dyn Reporter>,
+        operation_name: &str,
+    ) -> Self {
         SpanBuilder {
             span_context,
+            reporter,
             start_timestamp: None,
             operation_name: operation_name.to_owned(),
             references: vec![],
@@ -308,14 +331,22 @@ impl SpanBuilder {
 
     pub fn start(self) -> Span {
         Span {
-            span_context: self.span_context,
-            start_timestamp: self.start_timestamp.unwrap_or_else(SystemTime::now),
-            operation_name: self.operation_name,
-            references: self.references,
-            tags: self.tags,
-            log: vec![],
+            data: SpanData {
+                span_context: self.span_context,
+                start_timestamp: self.start_timestamp.unwrap_or_else(SystemTime::now),
+                finish_timestamp: None,
+                operation_name: self.operation_name,
+                references: self.references,
+                tags: self.tags,
+                log: vec![],
+            },
+            reporter: self.reporter,
         }
     }
+}
+
+pub trait Reporter: std::fmt::Debug {
+    fn report(&self, finished_span: FinishedSpan);
 }
 
 pub trait Tracer: Send + Sync {

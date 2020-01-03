@@ -1,7 +1,4 @@
-use distracing::Tracer;
-
 fn main() {
-    let tracer = distracing::tracer();
     let foo = distracing::tracer()
         .span("foo")
         .set_tag("spam", "bar")
