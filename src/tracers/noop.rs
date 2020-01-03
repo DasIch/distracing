@@ -1,4 +1,4 @@
-use crate::api::{SpanContextState, Tracer};
+use crate::api::{SpanBuilder, SpanContext, SpanContextState, Tracer};
 
 #[derive(Clone, Debug)]
 pub struct NoopTracer {}
@@ -15,9 +15,10 @@ pub struct NoopSpanContextState {}
 impl SpanContextState for NoopSpanContextState {}
 
 impl Tracer for NoopTracer {
-    type SpanContextState = NoopSpanContextState;
-
-    fn new_span_context_state(&self) -> Self::SpanContextState {
-        NoopSpanContextState {}
+    fn span(&self, operation_name: &str) -> SpanBuilder {
+        SpanBuilder::new(
+            SpanContext::new(Box::new(NoopSpanContextState {})),
+            operation_name,
+        )
     }
 }

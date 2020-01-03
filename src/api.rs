@@ -148,7 +148,7 @@ impl Event {
     }
 }
 
-pub trait SpanContextState: SpanContextClone {}
+pub trait SpanContextState: SpanContextClone + std::fmt::Debug {}
 
 pub trait SpanContextClone {
     fn clone_box(&self) -> Box<dyn SpanContextState>;
@@ -167,9 +167,18 @@ impl Clone for Box<dyn SpanContextState> {
 }
 
 #[derive(Clone, Debug)]
-pub struct SpanContext<S: SpanContextState> {
-    pub(crate) state: S,
+pub struct SpanContext {
+    pub(crate) state: Box<dyn SpanContextState>,
     pub baggage_items: HashMap<Key, String>,
+}
+
+impl SpanContext {
+    pub(crate) fn new(state: Box<dyn SpanContextState>) -> Self {
+        SpanContext {
+            state,
+            baggage_items: HashMap::new(),
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -179,35 +188,35 @@ pub enum ReferenceType {
 }
 
 #[derive(Debug)]
-pub struct Reference<S: SpanContextState + Clone> {
+pub struct Reference {
     pub rtype: ReferenceType,
-    pub to: SpanContext<S>,
+    pub to: SpanContext,
 }
 
 #[derive(Debug)]
-pub struct Span<S: SpanContextState + Clone> {
-    span_context: SpanContext<S>,
+pub struct Span {
+    span_context: SpanContext,
     pub(crate) start_timestamp: SystemTime,
     pub(crate) operation_name: String,
-    pub(crate) references: Vec<Reference<S>>,
+    pub(crate) references: Vec<Reference>,
     pub(crate) tags: HashMap<Key, Value>,
     pub(crate) log: Vec<(SystemTime, Vec<Event>)>,
 }
 
 #[derive(Debug)]
-pub struct FinishedSpan<S: SpanContextState + Clone> {
-    pub(crate) span: Span<S>,
+pub struct FinishedSpan {
+    pub(crate) span: Span,
     pub(crate) finish_timestamp: SystemTime,
 }
 
-impl<S: SpanContextState + Clone> FinishedSpan<S> {
-    pub fn span_context(&self) -> &SpanContext<S> {
+impl FinishedSpan {
+    pub fn span_context(&self) -> &SpanContext {
         &self.span.span_context
     }
 }
 
-impl<S: SpanContextState + Clone> Span<S> {
-    pub fn span_context(&self) -> &SpanContext<S> {
+impl Span {
+    pub fn span_context(&self) -> &SpanContext {
         &self.span_context
     }
 
@@ -240,11 +249,11 @@ impl<S: SpanContextState + Clone> Span<S> {
             .insert(key.into(), value.to_owned());
     }
 
-    pub fn finish(self) -> FinishedSpan<S> {
+    pub fn finish(self) -> FinishedSpan {
         self.finish_with_timestamp(SystemTime::now())
     }
 
-    pub fn finish_with_timestamp(self, timestamp: SystemTime) -> FinishedSpan<S> {
+    pub fn finish_with_timestamp(self, timestamp: SystemTime) -> FinishedSpan {
         FinishedSpan {
             span: self,
             finish_timestamp: timestamp,
@@ -252,16 +261,16 @@ impl<S: SpanContextState + Clone> Span<S> {
     }
 }
 
-pub struct SpanBuilder<S: SpanContextState + Clone> {
-    span_context: SpanContext<S>,
+pub struct SpanBuilder {
+    span_context: SpanContext,
     start_timestamp: Option<SystemTime>,
     operation_name: String,
-    references: Vec<Reference<S>>,
+    references: Vec<Reference>,
     tags: HashMap<Key, Value>,
 }
 
-impl<S: SpanContextState + Clone> SpanBuilder<S> {
-    pub(crate) fn new(span_context: SpanContext<S>, operation_name: &str) -> Self {
+impl SpanBuilder {
+    pub(crate) fn new(span_context: SpanContext, operation_name: &str) -> Self {
         SpanBuilder {
             span_context,
             start_timestamp: None,
@@ -271,7 +280,7 @@ impl<S: SpanContextState + Clone> SpanBuilder<S> {
         }
     }
 
-    pub fn child_of(mut self, span_context: &SpanContext<S>) -> Self {
+    pub fn child_of(mut self, span_context: &SpanContext) -> Self {
         self.references.push(Reference {
             rtype: ReferenceType::ChildOf,
             to: span_context.clone(),
@@ -279,7 +288,7 @@ impl<S: SpanContextState + Clone> SpanBuilder<S> {
         self
     }
 
-    pub fn follows_from(mut self, span_context: &SpanContext<S>) -> Self {
+    pub fn follows_from(mut self, span_context: &SpanContext) -> Self {
         self.references.push(Reference {
             rtype: ReferenceType::FollowsFrom,
             to: span_context.clone(),
@@ -297,7 +306,7 @@ impl<S: SpanContextState + Clone> SpanBuilder<S> {
         self
     }
 
-    pub fn start(self) -> Span<S> {
+    pub fn start(self) -> Span {
         Span {
             span_context: self.span_context,
             start_timestamp: self.start_timestamp.unwrap_or_else(SystemTime::now),
@@ -310,15 +319,5 @@ impl<S: SpanContextState + Clone> SpanBuilder<S> {
 }
 
 pub trait Tracer: Send + Sync {
-    type SpanContextState: SpanContextState + Clone;
-
-    fn new_span_context_state(&self) -> Self::SpanContextState;
-
-    fn span(&self, operation_name: &str) -> SpanBuilder<Self::SpanContextState> {
-        let span_context = SpanContext {
-            state: self.new_span_context_state(),
-            baggage_items: HashMap::new(),
-        };
-        SpanBuilder::new(span_context, operation_name)
-    }
+    fn span(&self, operation_name: &str) -> SpanBuilder;
 }
