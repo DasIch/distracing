@@ -149,7 +149,7 @@ impl Event {
     }
 }
 
-pub trait SpanContextState: SpanContextClone + std::fmt::Debug {}
+pub trait SpanContextState: SpanContextClone + Send + Sync + std::fmt::Debug {}
 
 pub trait SpanContextClone {
     fn clone_box(&self) -> Box<dyn SpanContextState>;

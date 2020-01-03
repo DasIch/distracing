@@ -13,7 +13,7 @@ pub fn tracer() -> Arc<dyn Tracer> {
         .clone()
 }
 
-pub fn set_tracer<S, T>(new_tracer: T)
+pub fn set_tracer<T>(new_tracer: T)
 where
     T: Tracer + 'static,
 {
