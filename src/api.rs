@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::SystemTime;
+use std::time::{Duration, Instant, SystemTime};
 
 pub type Key = Cow<'static, str>;
 
@@ -201,6 +201,8 @@ pub struct SpanData {
     pub(crate) span_context: SpanContext,
     pub(crate) start_timestamp: SystemTime,
     pub(crate) finish_timestamp: Option<SystemTime>,
+    pub(crate) start_instant: Instant,
+    pub(crate) duration: Option<Duration>,
     pub(crate) operation_name: String,
     pub(crate) references: Vec<Reference>,
     pub(crate) tags: HashMap<Key, Value>,
@@ -260,12 +262,9 @@ impl Span {
             .insert(key.into(), value.to_owned());
     }
 
-    pub fn finish(self) -> FinishedSpan {
-        self.finish_with_timestamp(SystemTime::now())
-    }
-
-    pub fn finish_with_timestamp(mut self, timestamp: SystemTime) -> FinishedSpan {
-        self.data.finish_timestamp = Some(timestamp);
+    pub fn finish(mut self) -> FinishedSpan {
+        self.data.duration = Some(self.data.start_instant.elapsed());
+        self.data.finish_timestamp = Some(SystemTime::now());
         FinishedSpan {
             data: self.data.clone(),
         }
@@ -274,6 +273,9 @@ impl Span {
 
 impl Drop for Span {
     fn drop(&mut self) {
+        if self.data.duration.is_none() {
+            self.data.duration = Some(self.data.start_instant.elapsed());
+        }
         if self.data.finish_timestamp.is_none() {
             self.data.finish_timestamp = Some(SystemTime::now());
         }
@@ -286,7 +288,6 @@ impl Drop for Span {
 pub struct SpanBuilder {
     span_context: SpanContext,
     reporter: Arc<dyn Reporter>,
-    start_timestamp: Option<SystemTime>,
     operation_name: String,
     references: Vec<Reference>,
     tags: HashMap<Key, Value>,
@@ -301,7 +302,6 @@ impl SpanBuilder {
         SpanBuilder {
             span_context,
             reporter,
-            start_timestamp: None,
             operation_name: operation_name.to_owned(),
             references: vec![],
             tags: HashMap::new(),
@@ -324,11 +324,6 @@ impl SpanBuilder {
         self
     }
 
-    pub fn set_start_timestamp(mut self, start_timestamp: SystemTime) -> Self {
-        self.start_timestamp = Some(start_timestamp);
-        self
-    }
-
     pub fn set_tag<K: Into<Key>, V: Into<Value>>(mut self, key: K, value: V) -> Self {
         self.tags.insert(key.into(), value.into());
         self
@@ -338,8 +333,10 @@ impl SpanBuilder {
         Span {
             data: SpanData {
                 span_context: self.span_context,
-                start_timestamp: self.start_timestamp.unwrap_or_else(SystemTime::now),
+                start_timestamp: SystemTime::now(),
                 finish_timestamp: None,
+                start_instant: Instant::now(),
+                duration: None,
                 operation_name: self.operation_name,
                 references: self.references,
                 tags: self.tags,

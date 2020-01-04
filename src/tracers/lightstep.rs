@@ -76,17 +76,12 @@ impl LightStepReporter {
 }
 
 fn serialize_span(span: FinishedSpan) -> collector::Span {
-    // TODO: Don't panic, if the wallclock time changes to the past.
-    // Could be done by storing an Instant in addition to the start timestamp, may require some
-    // hacking to convert SystemTime to Instance, in case a user actually sets a timestamp. See
-    // https://stackoverflow.com/questions/35282308/convert-between-c11-clocks for how that might
-    // work.
+    // Either Span.finish or Drop.drop sets the duration. Accordingly we should be able to fairly
+    // safely assume that it's set here.
     let duration = span
         .data
-        .finish_timestamp
-        .expect("BUG: finish_timestamp not set")
-        .duration_since(span.data.start_timestamp)
-        .expect("Wallclock time moved back into the past :/");
+        .duration
+        .expect("BUG: FinishedSpan duration not set");
     collector::Span {
         span_context: Some(serialize_span_context(span.data.span_context)),
         operation_name: span.data.operation_name,
