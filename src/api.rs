@@ -227,6 +227,27 @@ impl FinishedSpan {
 }
 
 impl Span {
+    pub(crate) fn new(
+        span_context: SpanContext,
+        reporter: Arc<dyn Reporter>,
+        options: SpanOptions,
+    ) -> Self {
+        Span {
+            data: SpanData {
+                span_context,
+                start_timestamp: SystemTime::now(),
+                finish_timestamp: None,
+                start_instant: Instant::now(),
+                duration: None,
+                operation_name: options.operation_name,
+                references: options.references,
+                tags: options.tags,
+                log: vec![],
+            },
+            reporter,
+        }
+    }
+
     pub fn span_context(&self) -> &SpanContext {
         &self.data.span_context
     }
@@ -285,31 +306,37 @@ impl Drop for Span {
     }
 }
 
-pub struct SpanBuilder {
-    span_context: SpanContext,
-    reporter: Arc<dyn Reporter>,
-    operation_name: String,
-    references: Vec<Reference>,
-    tags: HashMap<Key, Value>,
+pub struct SpanOptions {
+    pub(crate) operation_name: String,
+    pub(crate) references: Vec<Reference>,
+    pub(crate) tags: HashMap<Key, Value>,
 }
 
-impl SpanBuilder {
-    pub(crate) fn new(
-        span_context: SpanContext,
-        reporter: Arc<dyn Reporter>,
-        operation_name: &str,
-    ) -> Self {
-        SpanBuilder {
-            span_context,
-            reporter,
-            operation_name: operation_name.to_owned(),
+impl SpanOptions {
+    pub fn new(operation_name: &str) -> Self {
+        Self {
+            operation_name: operation_name.to_string(),
             references: vec![],
             tags: HashMap::new(),
         }
     }
+}
+
+pub struct SpanBuilder<'a> {
+    tracer: Box<&'a dyn Tracer>,
+    options: SpanOptions,
+}
+
+impl<'a> SpanBuilder<'a> {
+    pub(crate) fn new(tracer: Box<&'a dyn Tracer>, operation_name: &str) -> Self {
+        SpanBuilder {
+            tracer,
+            options: SpanOptions::new(operation_name),
+        }
+    }
 
     pub fn child_of(mut self, span_context: &SpanContext) -> Self {
-        self.references.push(Reference {
+        self.options.references.push(Reference {
             rtype: ReferenceType::ChildOf,
             to: span_context.clone(),
         });
@@ -317,7 +344,7 @@ impl SpanBuilder {
     }
 
     pub fn follows_from(mut self, span_context: &SpanContext) -> Self {
-        self.references.push(Reference {
+        self.options.references.push(Reference {
             rtype: ReferenceType::FollowsFrom,
             to: span_context.clone(),
         });
@@ -325,25 +352,12 @@ impl SpanBuilder {
     }
 
     pub fn set_tag<K: Into<Key>, V: Into<Value>>(mut self, key: K, value: V) -> Self {
-        self.tags.insert(key.into(), value.into());
+        self.options.tags.insert(key.into(), value.into());
         self
     }
 
     pub fn start(self) -> Span {
-        Span {
-            data: SpanData {
-                span_context: self.span_context,
-                start_timestamp: SystemTime::now(),
-                finish_timestamp: None,
-                start_instant: Instant::now(),
-                duration: None,
-                operation_name: self.operation_name,
-                references: self.references,
-                tags: self.tags,
-                log: vec![],
-            },
-            reporter: self.reporter,
-        }
+        self.tracer.span_with_options(self.options)
     }
 }
 
@@ -352,5 +366,7 @@ pub trait Reporter: std::fmt::Debug {
 }
 
 pub trait Tracer: Send + Sync {
-    fn span(&self, operation_name: &str) -> SpanBuilder;
+    fn span<'a>(&'a self, operation_name: &str) -> SpanBuilder<'a>;
+
+    fn span_with_options(&self, options: SpanOptions) -> Span;
 }

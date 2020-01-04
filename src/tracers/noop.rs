@@ -1,4 +1,6 @@
-use crate::api::{FinishedSpan, Reporter, SpanBuilder, SpanContext, SpanContextState, Tracer};
+use crate::api::{
+    FinishedSpan, Reporter, Span, SpanBuilder, SpanContext, SpanContextState, SpanOptions, Tracer,
+};
 use std::sync::Arc;
 
 #[derive(Debug)]
@@ -31,11 +33,15 @@ impl SpanContextState for NoopSpanContextState {
 }
 
 impl Tracer for NoopTracer {
-    fn span(&self, operation_name: &str) -> SpanBuilder {
-        SpanBuilder::new(
+    fn span<'a>(&'a self, operation_name: &str) -> SpanBuilder<'a> {
+        SpanBuilder::new(Box::new(self), operation_name)
+    }
+
+    fn span_with_options(&self, options: SpanOptions) -> Span {
+        Span::new(
             SpanContext::new(Box::new(NoopSpanContextState {})),
             self.reporter.clone(),
-            operation_name,
+            options,
         )
     }
 }

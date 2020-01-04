@@ -1,6 +1,6 @@
 use crate::api::{
-    Event, FinishedSpan, Key, Reference, ReferenceType, Reporter, SpanBuilder, SpanContext,
-    SpanContextState, Tracer, Value,
+    Event, FinishedSpan, Key, Reference, ReferenceType, Reporter, Span, SpanBuilder, SpanContext,
+    SpanContextState, SpanOptions, Tracer, Value,
 };
 use prost::Message;
 use reqwest::blocking::ClientBuilder as ReqwestClientBuilder;
@@ -467,11 +467,31 @@ fn create_reporter(config: &LightStepConfig) -> collector::Reporter {
 }
 
 impl Tracer for LightStepTracer {
-    fn span(&self, operation_name: &str) -> SpanBuilder {
-        SpanBuilder::new(
-            SpanContext::new(Box::new(LightStepSpanContextState::new())),
+    fn span<'a>(&'a self, operation_name: &str) -> SpanBuilder<'a> {
+        SpanBuilder::new(Box::new(self), operation_name)
+    }
+
+    fn span_with_options(&self, options: SpanOptions) -> Span {
+        let mut state = LightStepSpanContextState::new();
+        if options.references.len() > 0 {
+            // Unfortunately multiple references won't really work out :/ At least the Python
+            // LightStep tracer has the same problem and it's not clear to me how we might be able
+            // to address this.
+            //
+            // Downcasting could break, if someone passes a span context created from a different
+            // tracer but that seems unlikely.
+            state.trace_id = options.references[0]
+                .to
+                .state
+                .as_any()
+                .downcast_ref::<LightStepSpanContextState>()
+                .expect("Span references SpanContext created with a different Tracer")
+                .trace_id;
+        }
+        Span::new(
+            SpanContext::new(Box::new(state)),
             self.reporter.clone(),
-            operation_name,
+            options,
         )
     }
 }

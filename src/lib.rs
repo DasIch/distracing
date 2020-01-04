@@ -13,6 +13,7 @@ extern crate rand;
 #[cfg(feature = "lightstep")]
 extern crate reqwest;
 
+pub use api::Event;
 pub use api::Tracer;
 pub use tracers::global::{set_tracer, tracer};
 #[cfg(feature = "lightstep")]
