@@ -176,7 +176,7 @@ pub struct SpanContext {
 }
 
 impl SpanContext {
-    pub(crate) fn new(state: Box<dyn SpanContextState>) -> Self {
+    pub fn new(state: Box<dyn SpanContextState>) -> Self {
         SpanContext {
             state,
             baggage_items: HashMap::new(),

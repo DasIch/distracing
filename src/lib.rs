@@ -10,6 +10,8 @@ extern crate prost;
 extern crate prost_types;
 #[cfg(feature = "lightstep")]
 extern crate rand;
+#[cfg(feature = "lightstep")]
+extern crate reqwest;
 
 pub use api::Tracer;
 pub use tracers::global::{set_tracer, tracer};

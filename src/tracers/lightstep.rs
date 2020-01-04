@@ -2,6 +2,8 @@ use crate::api::{
     Event, FinishedSpan, Key, Reference, ReferenceType, Reporter, SpanBuilder, SpanContext,
     SpanContextState, Tracer, Value,
 };
+use prost::Message;
+use reqwest::blocking::ClientBuilder as ReqwestClientBuilder;
 use std::collections::HashMap;
 use std::convert::TryInto;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -41,6 +43,42 @@ impl SpanContextState for LightStepSpanContextState {
 }
 
 #[derive(Debug)]
+enum ReportRequestError {
+    ReqwestError(reqwest::Error),
+    InvalidResponseBody(prost::DecodeError),
+}
+
+impl From<reqwest::Error> for ReportRequestError {
+    fn from(err: reqwest::Error) -> Self {
+        Self::ReqwestError(err)
+    }
+}
+
+impl From<prost::DecodeError> for ReportRequestError {
+    fn from(err: prost::DecodeError) -> Self {
+        Self::InvalidResponseBody(err)
+    }
+}
+
+impl std::fmt::Display for ReportRequestError {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            Self::ReqwestError(e) => e.fmt(f),
+            Self::InvalidResponseBody(e) => e.fmt(f),
+        }
+    }
+}
+
+impl std::error::Error for ReportRequestError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::ReqwestError(e) => Some(e),
+            Self::InvalidResponseBody(e) => Some(e),
+        }
+    }
+}
+
+#[derive(Debug)]
 struct LightStepReporter {
     config: LightStepConfig,
     finished_spans: Arc<Mutex<Vec<FinishedSpan>>>,
@@ -54,20 +92,49 @@ impl LightStepReporter {
 
         let config_for_thread = config.clone();
         let finished_spans_for_thread = finished_spans.clone();
-        let join_handle = std::thread::spawn(move || loop {
-            let mut spans = Vec::with_capacity(config_for_thread.buffer_size);
-            {
-                let mut current_finished_spans = finished_spans_for_thread
-                    .lock()
-                    .expect("LightStepReporter.finished_spans RwLock poisoned");
-                std::mem::swap(&mut spans, &mut *current_finished_spans);
+        let join_handle = std::thread::spawn(move || {
+            let reporter = create_reporter(&config_for_thread);
+
+            // The Python implementation defaults to send an empty string instead of `None` even
+            // though the protocol buffer schema would allow the latter. In order to be on the safe
+            // side let's copy what LightStep is doing in their implementation.
+            //
+            // Default: https://github.com/lightstep/lightstep-tracer-python/blob/b8a47e25f085d58b46fa9bd6ee093e77aed5d62c/lightstep/recorder.py#L39
+            // Fail on non-str: https://github.com/lightstep/lightstep-tracer-python/blob/b8a47e25f085d58b46fa9bd6ee093e77aed5d62c/lightstep/recorder.py#L53-L54
+            // Override of None in report with empty string: https://github.com/lightstep/lightstep-tracer-python/blob/b8a47e25f085d58b46fa9bd6ee093e77aed5d62c/lightstep/http_connection.py#L32
+            let access_token = config_for_thread
+                .access_token
+                .clone()
+                .unwrap_or("".to_string());
+            let auth = Some(collector::Auth {
+                access_token: access_token.clone(),
+            });
+            let collector_url = config_for_thread.collector_url();
+            let mut headers = reqwest::header::HeaderMap::new();
+            headers.insert("Content-Type", "application/octet-stream".parse().unwrap());
+            headers.insert("Accept", "application/octet-stream".parse().unwrap());
+            headers.insert("Lightstep-Access-Token", access_token.parse().unwrap());
+            let client = ReqwestClientBuilder::new()
+                .connect_timeout(config_for_thread.send_timeout)
+                .timeout(config_for_thread.send_timeout)
+                .default_headers(headers)
+                .build()
+                .expect("LightStepReporter reqwest::blocking::Client creation failed");
+            loop {
+                let mut spans = Vec::with_capacity(config_for_thread.buffer_size);
+                {
+                    let mut current_finished_spans = finished_spans_for_thread
+                        .lock()
+                        .expect("LightStepReporter.finished_spans RwLock poisoned");
+                    std::mem::swap(&mut spans, &mut *current_finished_spans);
+                }
+                if spans.len() > 0 {
+                    let response =
+                        perform_report_request(&client, &collector_url, &reporter, &auth, spans);
+                    println!("Response: {:?}", response);
+                }
+                std::thread::sleep(config_for_thread.send_period);
             }
-            if spans.len() > 0 {
-                let serialized_spans: Vec<collector::Span> =
-                    spans.into_iter().map(serialize_span).collect();
-                println!("Serialized: {:?}", serialized_spans);
-            }
-            std::thread::sleep(config_for_thread.send_period);
         });
         LightStepReporter {
             config,
@@ -76,6 +143,48 @@ impl LightStepReporter {
             dropped_spans: AtomicUsize::new(0),
         }
     }
+}
+
+fn perform_report_request(
+    client: &reqwest::blocking::Client,
+    collector_url: &str,
+    reporter: &collector::Reporter,
+    auth: &Option<collector::Auth>,
+    spans: Vec<FinishedSpan>,
+) -> Result<collector::ReportResponse, ReportRequestError> {
+    let request_body = create_report_request_body(&reporter, &auth, spans);
+    let mut http_response = client.post(collector_url).body(request_body).send()?;
+    parse_response(&mut http_response)
+}
+
+fn create_report_request_body(
+    reporter: &collector::Reporter,
+    auth: &Option<collector::Auth>,
+    spans: Vec<FinishedSpan>,
+) -> Vec<u8> {
+    let serialized_spans: Vec<collector::Span> = spans.into_iter().map(serialize_span).collect();
+    let request = collector::ReportRequest {
+        reporter: Some(reporter.clone()),
+        auth: auth.clone(),
+        spans: serialized_spans,
+        timestamp_offset_micros: 0,
+        internal_metrics: None,
+    };
+    let mut body = Vec::with_capacity(request.encoded_len());
+    request
+        .encode(&mut body)
+        .expect("Buffer for ReportRequest has insufficient capacity");
+    body
+}
+
+fn parse_response(
+    http_response: &mut reqwest::blocking::Response,
+) -> Result<collector::ReportResponse, ReportRequestError> {
+    // TODO: DON'T PANIC! Implement proper error handling.
+    let mut body: Vec<u8> = vec![];
+    http_response.copy_to(&mut body)?;
+    let response = collector::ReportResponse::decode(body)?;
+    Ok(response)
 }
 
 fn serialize_span(span: FinishedSpan) -> collector::Span {
@@ -96,7 +205,7 @@ fn serialize_span(span: FinishedSpan) -> collector::Span {
             .collect(),
         start_timestamp: Some(span.data.start_timestamp.into()),
         duration_micros: duration.as_micros() as u64,
-        tags: span.data.tags.into_iter().map(serialize_tag).collect(),
+        tags: serialize_tags(span.data.tags),
         logs: span.data.log.into_iter().map(serialize_log_entry).collect(),
     }
 }
@@ -131,6 +240,10 @@ fn serialize_reference(reference: Reference) -> collector::Reference {
         relationship: relationship.into(),
         span_context: Some(serialize_span_context(reference.to)),
     }
+}
+
+fn serialize_tags(tags: HashMap<Key, Value>) -> Vec<collector::KeyValue> {
+    tags.into_iter().map(serialize_tag).collect()
 }
 
 fn serialize_tag((key, value): (Key, Value)) -> collector::KeyValue {
@@ -223,11 +336,14 @@ impl LightStepTracer {
 
 #[derive(Clone, Debug)]
 pub struct LightStepConfig {
-    pub access_token: Option<String>,
-    pub component_name: Option<String>,
-    pub tags: HashMap<Key, Value>,
-    pub buffer_size: usize,
-    pub send_period: Duration,
+    access_token: Option<String>,
+    component_name: Option<String>,
+    tags: HashMap<Key, Value>,
+    collector_host: String,
+    collector_port: usize,
+    buffer_size: usize,
+    send_period: Duration,
+    send_timeout: Duration,
 }
 
 impl LightStepConfig {
@@ -236,12 +352,20 @@ impl LightStepConfig {
             access_token: None,
             component_name: None,
             tags: HashMap::new(),
+            collector_host: "collector.lightstep.com".to_string(),
+            collector_port: 443,
+
             // Copied from LightStep's own tracer implementations
             // Ref: https://github.com/lightstep/lightstep-tracer-python/blob/e146b1cad82c0b4c783a3a77872d816156c06dde/lightstep/constants.py#L6
             buffer_size: 1000,
+
             // Copied from LightStep's own tracer implementations
             // Ref: https://github.com/lightstep/lightstep-tracer-python/blob/e146b1cad82c0b4c783a3a77872d816156c06dde/lightstep/constants.py#L5
             send_period: Duration::from_millis(2_500), // 2.5s copied from LightStep's own tracer implementations
+
+            // Copied from LightStep's own tracer implementations
+            // Ref: https://github.com/lightstep/lightstep-tracer-python/blob/b8a47e25f085d58b46fa9bd6ee093e77aed5d62c/lightstep/recorder.py#L50
+            send_timeout: Duration::from_secs(30),
         }
     }
 
@@ -260,6 +384,23 @@ impl LightStepConfig {
         self
     }
 
+    pub fn collector_host<S: Into<String>>(&mut self, collector_host: S) -> &mut Self {
+        self.collector_host = collector_host.into();
+        self
+    }
+
+    pub fn collector_port(&mut self, collector_port: usize) -> &mut Self {
+        self.collector_port = collector_port;
+        self
+    }
+
+    fn collector_url(&self) -> String {
+        format!(
+            "https://{}:{}/api/v2/reports",
+            self.collector_host, self.collector_port
+        )
+    }
+
     pub fn buffer_size(&mut self, buffer_size: usize) -> &mut Self {
         self.buffer_size = buffer_size;
         self
@@ -273,6 +414,56 @@ impl LightStepConfig {
     pub fn build(&mut self) -> LightStepTracer {
         LightStepTracer::new_with_config(self.clone())
     }
+}
+
+fn create_reporter(config: &LightStepConfig) -> collector::Reporter {
+    use rand::prelude::*;
+    let reporter_id: u64 = rand::thread_rng().gen();
+    let mut config = config.clone();
+
+    // TODO: Add "lightstep.tracer_platform_version" Should be the rust compiler version
+    // TODO: Add "lightstep.tracer_version" Should be the distracing version
+
+    // Normally this tag has the language as value. However I don't want to force LightStep to
+    // break convention, should they provide a native tracer implementation
+    config.tag("lightstep.tracer_platform", "rust (distracing)");
+    let component_name = config
+        .component_name
+        .as_ref()
+        .map(|s| s.as_str())
+        .unwrap_or_else(|| "None")
+        .to_string();
+    config.tag("lightstep.component_name", component_name);
+    config.tag("lightstep.guid", reporter_id);
+    let tags = serialize_tags(config.tags.clone());
+    let tags = tags
+        .into_iter()
+        .map(|kv| collector::KeyValue {
+            key: kv.key,
+            value: kv.value.map(|v| match v {
+                collector::key_value::Value::BoolValue(b) => {
+                    collector::key_value::Value::StringValue(b.to_string())
+                }
+                collector::key_value::Value::IntValue(n) => {
+                    collector::key_value::Value::StringValue(n.to_string())
+                }
+                collector::key_value::Value::DoubleValue(n) => {
+                    collector::key_value::Value::StringValue(n.to_string())
+                }
+                collector::key_value::Value::JsonValue(s) => {
+                    collector::key_value::Value::StringValue(s)
+                }
+                collector::key_value::Value::StringValue(s) => {
+                    collector::key_value::Value::StringValue(s)
+                }
+            }),
+        })
+        .collect();
+
+    // LightStep provided tracer implementations actually force values to be Value::StringValue. I
+    // don't know whether this is actually necessary but let's do it to be safe until I get an a
+    // clear answer from them.
+    collector::Reporter { reporter_id, tags }
 }
 
 impl Tracer for LightStepTracer {
