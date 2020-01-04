@@ -2,10 +2,11 @@ use crate::api::{
     Event, FinishedSpan, Key, Reference, ReferenceType, Reporter, SpanBuilder, SpanContext,
     SpanContextState, Tracer, Value,
 };
+use std::collections::HashMap;
 use std::convert::TryInto;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 /// Generated code based on lightstep-tracer-common/collector.proto
 mod collector {
@@ -41,18 +42,20 @@ impl SpanContextState for LightStepSpanContextState {
 
 #[derive(Debug)]
 struct LightStepReporter {
+    config: LightStepConfig,
     finished_spans: Arc<Mutex<Vec<FinishedSpan>>>,
-    max_finished_spans: usize,
     join_handle: std::thread::JoinHandle<()>,
     dropped_spans: AtomicUsize,
 }
 
 impl LightStepReporter {
-    fn new(max_finished_spans: usize) -> Self {
-        let finished_spans = Arc::new(Mutex::new(vec![]));
+    fn new(config: LightStepConfig) -> Self {
+        let finished_spans = Arc::new(Mutex::new(Vec::with_capacity(config.buffer_size)));
+
+        let config_for_thread = config.clone();
         let finished_spans_for_thread = finished_spans.clone();
         let join_handle = std::thread::spawn(move || loop {
-            let mut spans = vec![];
+            let mut spans = Vec::with_capacity(config_for_thread.buffer_size);
             {
                 let mut current_finished_spans = finished_spans_for_thread
                     .lock()
@@ -64,11 +67,11 @@ impl LightStepReporter {
                     spans.into_iter().map(serialize_span).collect();
                 println!("Serialized: {:?}", serialized_spans);
             }
-            std::thread::sleep(std::time::Duration::from_secs(2));
+            std::thread::sleep(config_for_thread.send_period);
         });
         LightStepReporter {
+            config,
             finished_spans: finished_spans,
-            max_finished_spans,
             join_handle,
             dropped_spans: AtomicUsize::new(0),
         }
@@ -189,7 +192,7 @@ impl Reporter for LightStepReporter {
             .lock()
             .expect("LightStepReporter.finished_spans Mutex poisoned");
 
-        if finished_spans.len() > self.max_finished_spans {
+        if finished_spans.len() > self.config.buffer_size {
             self.dropped_spans.fetch_add(1, Ordering::SeqCst);
             return;
         }
@@ -204,10 +207,71 @@ pub struct LightStepTracer {
 
 impl LightStepTracer {
     pub fn new() -> Self {
-        // TODO: configuration
-        LightStepTracer {
-            reporter: Arc::new(LightStepReporter::new(1000)),
+        Self::build().build()
+    }
+
+    pub fn build() -> LightStepConfig {
+        LightStepConfig::new()
+    }
+
+    fn new_with_config(config: LightStepConfig) -> Self {
+        Self {
+            reporter: Arc::new(LightStepReporter::new(config)),
         }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct LightStepConfig {
+    pub access_token: Option<String>,
+    pub component_name: Option<String>,
+    pub tags: HashMap<Key, Value>,
+    pub buffer_size: usize,
+    pub send_period: Duration,
+}
+
+impl LightStepConfig {
+    fn new() -> Self {
+        LightStepConfig {
+            access_token: None,
+            component_name: None,
+            tags: HashMap::new(),
+            // Copied from LightStep's own tracer implementations
+            // Ref: https://github.com/lightstep/lightstep-tracer-python/blob/e146b1cad82c0b4c783a3a77872d816156c06dde/lightstep/constants.py#L6
+            buffer_size: 1000,
+            // Copied from LightStep's own tracer implementations
+            // Ref: https://github.com/lightstep/lightstep-tracer-python/blob/e146b1cad82c0b4c783a3a77872d816156c06dde/lightstep/constants.py#L5
+            send_period: Duration::from_millis(2_500), // 2.5s copied from LightStep's own tracer implementations
+        }
+    }
+
+    pub fn access_token<S: Into<String>>(&mut self, access_token: S) -> &mut Self {
+        self.access_token = Some(access_token.into());
+        self
+    }
+
+    pub fn component_name<S: Into<String>>(&mut self, component_name: S) -> &mut Self {
+        self.component_name = Some(component_name.into());
+        self
+    }
+
+    pub fn tag<K: Into<Key>, V: Into<Value>>(&mut self, key: K, value: V) -> &mut Self {
+        self.tags.insert(key.into(), value.into());
+        self
+    }
+
+    pub fn buffer_size(&mut self, buffer_size: usize) -> &mut Self {
+        self.buffer_size = buffer_size;
+        self
+    }
+
+    pub fn send_period(&mut self, send_period: Duration) -> &mut Self {
+        self.send_period = send_period;
+        self
+    }
+
+    pub fn build(&mut self) -> LightStepTracer {
+        LightStepTracer::new_with_config(self.clone())
     }
 }
 
