@@ -2,6 +2,7 @@ use crate::api::{
     Event, FinishedSpan, Key, Reference, ReferenceType, Reporter, Span, SpanBuilder, SpanContext,
     SpanContextState, SpanOptions, Tracer, Value,
 };
+use log::{error, info, warn};
 use prost::Message;
 use reqwest::blocking::ClientBuilder as ReqwestClientBuilder;
 use std::collections::HashMap;
@@ -131,7 +132,14 @@ impl LightStepReporter {
                 if spans.len() > 0 {
                     let response =
                         perform_report_request(&client, &collector_url, &reporter, &auth, spans);
-                    println!("Response: {:?}", response);
+                    match response {
+                        Ok(r) => {
+                            log_report_response(&r);
+                        }
+                        Err(err) => {
+                            error!("Sending requests to LightStep collector failed: {}", err);
+                        }
+                    }
                 }
                 std::thread::sleep(config_for_thread.send_period);
             }
@@ -142,6 +150,18 @@ impl LightStepReporter {
             join_handle,
             dropped_spans: AtomicUsize::new(0),
         }
+    }
+}
+
+fn log_report_response(response: &collector::ReportResponse) {
+    for message in &response.errors {
+        error!("Received message from LightStep: {}", message);
+    }
+    for message in &response.warnings {
+        warn!("Received message from LightStep: {}", message);
+    }
+    for message in &response.infos {
+        info!("Received message from LightStep: {}", message);
     }
 }
 
