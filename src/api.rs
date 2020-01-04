@@ -132,8 +132,8 @@ impl From<isize> for Value {
 
 #[derive(Clone, Debug)]
 pub struct Event {
-    key: Key,
-    value: Value,
+    pub(crate) key: Key,
+    pub(crate) value: Value,
 }
 
 impl Event {
@@ -149,7 +149,9 @@ impl Event {
     }
 }
 
-pub trait SpanContextState: SpanContextClone + Send + Sync + std::fmt::Debug {}
+pub trait SpanContextState: SpanContextClone + Send + Sync + std::fmt::Debug {
+    fn as_any(&self) -> &dyn std::any::Any;
+}
 
 pub trait SpanContextClone {
     fn clone_box(&self) -> Box<dyn SpanContextState>;
@@ -272,6 +274,9 @@ impl Span {
 
 impl Drop for Span {
     fn drop(&mut self) {
+        if self.data.finish_timestamp.is_none() {
+            self.data.finish_timestamp = Some(SystemTime::now());
+        }
         self.reporter.report(FinishedSpan {
             data: self.data.clone(),
         })

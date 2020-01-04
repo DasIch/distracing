@@ -5,8 +5,6 @@ extern crate lazy_static;
 #[cfg(feature = "lightstep")]
 extern crate bytes;
 #[cfg(feature = "lightstep")]
-extern crate crossbeam_channel;
-#[cfg(feature = "lightstep")]
 extern crate prost;
 #[cfg(feature = "lightstep")]
 extern crate prost_types;

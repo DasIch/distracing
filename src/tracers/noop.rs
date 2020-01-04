@@ -24,7 +24,11 @@ impl NoopTracer {
 #[derive(Clone, Debug)]
 pub struct NoopSpanContextState {}
 
-impl SpanContextState for NoopSpanContextState {}
+impl SpanContextState for NoopSpanContextState {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+}
 
 impl Tracer for NoopTracer {
     fn span(&self, operation_name: &str) -> SpanBuilder {

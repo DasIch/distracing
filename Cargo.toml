@@ -9,7 +9,7 @@ build = "build.rs"
 # https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
-lightstep = ["prost", "prost-types", "bytes", "prost-build", "rand", "crossbeam-channel"]
+lightstep = ["prost", "prost-types", "bytes", "prost-build", "rand"]
 
 [dependencies]
 lazy_static = { version = "1.4.0" }
@@ -18,7 +18,6 @@ prost = { version = "0.5.0", optional = true }
 bytes = { version = "0.4.0", optional = true }
 prost-types = { version = "0.5.0", optional = true }
 rand = { version = "0.7", optional = true }
-crossbeam-channel = { version = "0.4.0", optional = true }
 
 [build-dependencies]
 prost-build = { version = "0.5.0", optional = true }

@@ -41,7 +41,11 @@ impl MockTracer {
 #[derive(Clone, Debug)]
 pub struct MockSpanContextState {}
 
-impl SpanContextState for MockSpanContextState {}
+impl SpanContextState for MockSpanContextState {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+}
 
 impl Tracer for MockTracer {
     fn span(&self, operation_name: &str) -> SpanBuilder {
