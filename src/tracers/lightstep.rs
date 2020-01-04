@@ -172,6 +172,7 @@ fn perform_report_request(
     auth: &Option<collector::Auth>,
     spans: Vec<FinishedSpan>,
 ) -> Result<collector::ReportResponse, ReportRequestError> {
+    // TODO: Improve resilience!
     let request_body = create_report_request_body(&reporter, &auth, spans);
     let mut http_response = client.post(collector_url).body(request_body).send()?;
     parse_response(&mut http_response)
@@ -200,7 +201,6 @@ fn create_report_request_body(
 fn parse_response(
     http_response: &mut reqwest::blocking::Response,
 ) -> Result<collector::ReportResponse, ReportRequestError> {
-    // TODO: DON'T PANIC! Implement proper error handling.
     let mut body: Vec<u8> = vec![];
     http_response.copy_to(&mut body)?;
     let response = collector::ReportResponse::decode(body)?;
