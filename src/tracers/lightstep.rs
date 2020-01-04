@@ -21,6 +21,7 @@ mod carrier {
     include!(concat!(env!("OUT_DIR"), "/lightstep.rs"));
 }
 
+const LIGHTSTEP_TRACER_PLATFORM_VERSION: &str = env!("RUSTC_VERSION");
 const LIGHTSTEP_TRACER_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[derive(Debug, Clone)]
@@ -443,11 +444,13 @@ fn create_reporter(config: &LightStepConfig) -> collector::Reporter {
     let reporter_id: u64 = rand::thread_rng().gen();
     let mut config = config.clone();
 
-    // TODO: Add "lightstep.tracer_platform_version" Should be the rust compiler version
-
     // Normally this tag has the language as value. However I don't want to force LightStep to
     // break convention, should they provide a native tracer implementation
     config.tag("lightstep.tracer_platform", "rust (distracing)");
+    config.tag(
+        "lightstep.tracer_platform_version",
+        LIGHTSTEP_TRACER_PLATFORM_VERSION,
+    );
     config.tag("lightstep.tracer_version", LIGHTSTEP_TRACER_VERSION);
     let component_name = config
         .component_name
