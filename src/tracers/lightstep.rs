@@ -1,10 +1,11 @@
 use crate::api::{
-    Event, FinishedSpan, Key, Reference, ReferenceType, Reporter, Span, SpanBuilder, SpanContext,
-    SpanContextState, SpanOptions, Tracer, Value,
+    CarrierMap, Event, FinishedSpan, Key, Reference, ReferenceType, Reporter, Span, SpanBuilder,
+    SpanContext, SpanContextCorrupted, SpanContextState, SpanOptions, Tracer, Value,
 };
 use log::{error, info, warn};
 use prost::Message;
 use reqwest::blocking::ClientBuilder as ReqwestClientBuilder;
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::convert::TryInto;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -23,6 +24,11 @@ mod carrier {
 
 const LIGHTSTEP_TRACER_PLATFORM_VERSION: &str = env!("RUSTC_VERSION");
 const LIGHTSTEP_TRACER_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+const TEXT_MAP_TRACE_ID_FIELD: &str = "ot-tracer-traceid";
+const TEXT_MAP_SPAN_ID_FIELD: &str = "ot-tracer-spanid";
+const TEXT_MAP_SAMPLED_FIELD: &str = "ot-tracer-sampled";
+const TEXT_MAP_PREFIX_BAGGAGE: &str = "ot-baggage-";
 
 #[derive(Debug, Clone)]
 struct LightStepSpanContextState {
@@ -518,5 +524,134 @@ impl Tracer for LightStepTracer {
             self.reporter.clone(),
             options,
         )
+    }
+
+    fn inject_into_text_map(&self, span_context: &SpanContext, carrier: &mut dyn CarrierMap) {
+        let state = span_context
+            .state
+            .as_any()
+            .downcast_ref::<LightStepSpanContextState>()
+            .expect("SpanContext created with different Tracer");
+
+        carrier.set(TEXT_MAP_TRACE_ID_FIELD, &format!("{:x}", state.trace_id));
+        carrier.set(TEXT_MAP_SPAN_ID_FIELD, &format!("{:x}", state.span_id));
+        carrier.set(TEXT_MAP_SAMPLED_FIELD, "false");
+    }
+
+    fn extract_from_text_map(
+        &self,
+        carrier: &dyn CarrierMap,
+    ) -> Result<SpanContext, SpanContextCorrupted> {
+        let mut trace_id: Option<u64> = None;
+        let mut span_id: Option<u64> = None;
+        let mut baggage_items: HashMap<Cow<'static, str>, String> = HashMap::new();
+
+        for key in carrier.keys() {
+            if key == TEXT_MAP_TRACE_ID_FIELD {
+                match u64::from_str_radix(carrier.get(&key).unwrap(), 16) {
+                    Ok(tid) => trace_id = Some(tid),
+                    Err(_) => {
+                        return Err(SpanContextCorrupted {
+                            message: format!(
+                                "{} is not a hexadecimal u64",
+                                TEXT_MAP_TRACE_ID_FIELD
+                            ),
+                        })
+                    }
+                };
+            } else if key == TEXT_MAP_TRACE_ID_FIELD {
+                match u64::from_str_radix(carrier.get(&key).unwrap(), 16) {
+                    Ok(sid) => span_id = Some(sid),
+                    Err(_) => {
+                        return Err(SpanContextCorrupted {
+                            message: format!("{} is not a hexadecimal u64", TEXT_MAP_SPAN_ID_FIELD),
+                        })
+                    }
+                };
+            } else if key.starts_with(TEXT_MAP_PREFIX_BAGGAGE) {
+                let baggage_key = &key[TEXT_MAP_PREFIX_BAGGAGE.len()..];
+                let baggage_value = carrier.get(baggage_key).unwrap();
+                baggage_items.insert(
+                    Cow::Owned(baggage_key.to_string()),
+                    baggage_value.to_string(),
+                );
+            }
+        }
+
+        if let None = trace_id {
+            return Err(SpanContextCorrupted {
+                message: format!("{} is missing", TEXT_MAP_TRACE_ID_FIELD),
+            });
+        }
+        if let None = span_id {
+            return Err(SpanContextCorrupted {
+                message: format!("{} is missing", TEXT_MAP_SPAN_ID_FIELD),
+            });
+        }
+
+        Ok(SpanContext {
+            state: Box::new(LightStepSpanContextState {
+                trace_id: trace_id.unwrap(),
+                span_id: span_id.unwrap(),
+            }),
+            baggage_items,
+        })
+    }
+
+    fn inject_into_binary(&self, span_context: &SpanContext) -> Vec<u8> {
+        let state = span_context
+            .state
+            .as_any()
+            .downcast_ref::<LightStepSpanContextState>()
+            .expect("SpanContext created with different Tracer");
+        let carrier = carrier::BinaryCarrier {
+            deprecated_text_ctx: vec![],
+            basic_ctx: Some(carrier::BasicTracerCarrier {
+                trace_id: state.trace_id,
+                span_id: state.span_id,
+                sampled: false,
+                baggage_items: span_context
+                    .baggage_items
+                    .clone()
+                    .into_iter()
+                    .map(|(k, v)| (k.into_owned(), v))
+                    .collect(),
+            }),
+        };
+        let mut buffer: Vec<u8> = Vec::with_capacity(carrier.encoded_len());
+        // Ignore the result because the only possible failure is the buffer running out of
+        // capacity and it's not like that is going to happen.
+        let _ = carrier.encode(&mut buffer);
+        buffer
+    }
+
+    fn extract_from_binary(&self, carrier: &[u8]) -> Result<SpanContext, SpanContextCorrupted> {
+        let carrier = match carrier::BinaryCarrier::decode(carrier) {
+            Ok(c) => c,
+            Err(err) => {
+                return Err(SpanContextCorrupted {
+                    message: format!("{}", err),
+                })
+            }
+        };
+        let basic_ctx = match carrier.basic_ctx {
+            Some(basic_ctx) => basic_ctx,
+            None => {
+                return Err(SpanContextCorrupted {
+                    message: "missing basic_ctx".to_string(),
+                })
+            }
+        };
+        Ok(SpanContext {
+            state: Box::new(LightStepSpanContextState {
+                trace_id: basic_ctx.trace_id,
+                span_id: basic_ctx.span_id,
+            }),
+            baggage_items: basic_ctx
+                .baggage_items
+                .into_iter()
+                .map(|(k, v)| (Cow::Owned(k), v))
+                .collect(),
+        })
     }
 }

@@ -12,7 +12,7 @@ extern crate prost;
 extern crate prost_types;
 #[cfg(feature = "lightstep")]
 extern crate rand;
-#[cfg(feature = "lightstep")]
+#[cfg(any(feature = "lightstep", feature = "reqwest"))]
 extern crate reqwest;
 
 pub use api::Event;

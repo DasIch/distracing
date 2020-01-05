@@ -365,8 +365,81 @@ pub trait Reporter: std::fmt::Debug {
     fn report(&self, finished_span: FinishedSpan);
 }
 
+#[derive(Debug)]
+pub struct SpanContextCorrupted {
+    pub message: String,
+}
+
+impl std::fmt::Display for SpanContextCorrupted {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{}", self.message)
+    }
+}
+
+impl std::error::Error for SpanContextCorrupted {}
+
 pub trait Tracer: Send + Sync {
     fn span<'a>(&'a self, operation_name: &str) -> SpanBuilder<'a>;
 
     fn span_with_options(&self, options: SpanOptions) -> Span;
+
+    fn inject_into_text_map(&self, span_context: &SpanContext, carrier: &mut dyn CarrierMap);
+
+    fn extract_from_text_map(
+        &self,
+        carrier: &dyn CarrierMap,
+    ) -> Result<SpanContext, SpanContextCorrupted>;
+
+    fn inject_into_http_headers(&self, span_context: &SpanContext, carrier: &mut dyn CarrierMap) {
+        self.inject_into_text_map(span_context, carrier)
+    }
+
+    fn extract_from_http_headers(
+        &self,
+        carrier: &dyn CarrierMap,
+    ) -> Result<SpanContext, SpanContextCorrupted> {
+        self.extract_from_text_map(carrier)
+    }
+
+    fn inject_into_binary(&self, span_context: &SpanContext) -> Vec<u8>;
+
+    fn extract_from_binary(&self, carrier: &[u8]) -> Result<SpanContext, SpanContextCorrupted>;
+}
+
+pub trait CarrierMap {
+    fn keys<'a>(&'a self) -> Box<dyn Iterator<Item = String> + 'a>;
+
+    fn get(&self, key: &str) -> Option<&str>;
+
+    fn set(&mut self, key: &str, value: &str);
+}
+
+impl CarrierMap for HashMap<String, String> {
+    fn keys<'a>(&'a self) -> Box<dyn Iterator<Item = String> + 'a> {
+        Box::new(self.keys().map(|k| k.clone()))
+    }
+
+    fn get(&self, key: &str) -> Option<&str> {
+        self.get(key).map(|v| v.as_str())
+    }
+
+    fn set(&mut self, key: &str, value: &str) {
+        self.insert(key.to_string(), value.to_string());
+    }
+}
+
+#[cfg(feature = "reqwest")]
+impl CarrierMap for reqwest::header::HeaderMap {
+    fn keys<'a>(&'a self) -> Box<dyn Iterator<Item = String> + 'a> {
+        Box::new(self.keys().map(|name| name.to_string()))
+    }
+
+    fn get(&self, key: &str) -> Option<&str> {
+        self.get(key).and_then(|v| v.to_str().ok())
+    }
+
+    fn set(&mut self, key: &str, value: &str) {
+        let name: reqwest::header::HeaderName = key.parse().unwrap();
+        self.insert(name, value.parse().unwrap());
+    }
 }

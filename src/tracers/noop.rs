@@ -1,5 +1,6 @@
 use crate::api::{
-    FinishedSpan, Reporter, Span, SpanBuilder, SpanContext, SpanContextState, SpanOptions, Tracer,
+    CarrierMap, FinishedSpan, Reporter, Span, SpanBuilder, SpanContext, SpanContextCorrupted,
+    SpanContextState, SpanOptions, Tracer,
 };
 use std::sync::Arc;
 
@@ -43,5 +44,22 @@ impl Tracer for NoopTracer {
             self.reporter.clone(),
             options,
         )
+    }
+
+    fn inject_into_text_map(&self, _span_context: &SpanContext, _carrier: &mut dyn CarrierMap) {}
+
+    fn extract_from_text_map(
+        &self,
+        _carrier: &dyn CarrierMap,
+    ) -> Result<SpanContext, SpanContextCorrupted> {
+        Ok(SpanContext::new(Box::new(NoopSpanContextState {})))
+    }
+
+    fn inject_into_binary(&self, _span_context: &SpanContext) -> Vec<u8> {
+        vec![]
+    }
+
+    fn extract_from_binary(&self, _carrier: &[u8]) -> Result<SpanContext, SpanContextCorrupted> {
+        Ok(SpanContext::new(Box::new(NoopSpanContextState {})))
     }
 }
