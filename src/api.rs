@@ -404,6 +404,8 @@ pub trait Tracer: Send + Sync {
     fn inject_into_binary(&self, span_context: &SpanContext) -> Vec<u8>;
 
     fn extract_from_binary(&self, carrier: &[u8]) -> Result<SpanContext, SpanContextCorrupted>;
+
+    fn flush(&self) {}
 }
 
 pub trait CarrierMap {
