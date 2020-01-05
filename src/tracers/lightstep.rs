@@ -104,6 +104,7 @@ struct LightStepReporter {
     join_handle: std::thread::JoinHandle<()>,
     dropped_spans: AtomicUsize,
     is_running: Weak<AtomicBool>,
+    is_sending: Arc<AtomicBool>,
 }
 
 impl LightStepReporter {
@@ -115,6 +116,9 @@ impl LightStepReporter {
 
         let is_running_for_thread = Arc::new(AtomicBool::new(true));
         let is_running = Arc::downgrade(&is_running_for_thread);
+
+        let is_sending = Arc::new(AtomicBool::new(false));
+        let is_sending_for_thread = is_sending.clone();
 
         let join_handle = std::thread::spawn(move || {
             let reporter = create_reporter(&config_for_thread);
@@ -151,6 +155,9 @@ impl LightStepReporter {
                         .lock()
                         .expect("LightStepReporter.finished_spans RwLock poisoned");
                     std::mem::swap(&mut spans, &mut *current_finished_spans);
+                    if spans.len() > 0 {
+                        is_sending_for_thread.store(true, Ordering::SeqCst);
+                    }
                 }
                 if spans.len() > 0 {
                     let response =
@@ -164,6 +171,7 @@ impl LightStepReporter {
                         }
                     }
                 }
+                is_sending_for_thread.store(false, Ordering::SeqCst);
                 std::thread::sleep(config_for_thread.send_period);
             }
         });
@@ -173,6 +181,7 @@ impl LightStepReporter {
             join_handle,
             dropped_spans: AtomicUsize::new(0),
             is_running,
+            is_sending,
         }
     }
 
@@ -181,6 +190,17 @@ impl LightStepReporter {
             Some(b) => b.load(Ordering::SeqCst),
             None => false,
         }
+    }
+
+    fn has_pending_spans(&self) -> bool {
+        let has_buffered_spans = self
+            .finished_spans
+            .lock()
+            .expect("LightStepReporter.finished_spans RwLock poisoned")
+            .len()
+            > 0;
+        let is_sending = self.is_sending.load(Ordering::SeqCst);
+        has_buffered_spans || is_sending
     }
 }
 
