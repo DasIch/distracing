@@ -30,7 +30,7 @@ const TEXT_MAP_SPAN_ID_FIELD: &str = "ot-tracer-spanid";
 const TEXT_MAP_SAMPLED_FIELD: &str = "ot-tracer-sampled";
 const TEXT_MAP_PREFIX_BAGGAGE: &str = "ot-baggage-";
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct LightStepSpanContextState {
     trace_id: u64,
     span_id: u64,
@@ -560,7 +560,7 @@ impl Tracer for LightStepTracer {
                         })
                     }
                 };
-            } else if key == TEXT_MAP_TRACE_ID_FIELD {
+            } else if key == TEXT_MAP_SPAN_ID_FIELD {
                 match u64::from_str_radix(carrier.get(&key).unwrap(), 16) {
                     Ok(sid) => span_id = Some(sid),
                     Err(_) => {
@@ -650,5 +650,40 @@ impl Tracer for LightStepTracer {
                 .map(|(k, v)| (Cow::Owned(k), v))
                 .collect(),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{LightStepSpanContextState, LightStepTracer};
+    use crate::api::{SpanContext, Tracer};
+    use std::collections::HashMap;
+
+    fn assert_span_context_eq(a: &SpanContext, b: &SpanContext) {
+        assert_eq!(a.baggage_items, b.baggage_items);
+        let a_state = LightStepSpanContextState::from_trait_object(&a.state);
+        let b_state = LightStepSpanContextState::from_trait_object(&b.state);
+        assert_eq!(a_state, b_state);
+    }
+
+    #[test]
+    fn test_text_map_inject_and_extract() {
+        let tracer = LightStepTracer::new();
+        let span = tracer.span("foo").start();
+        let span_context = span.span_context();
+        let mut text_map: HashMap<String, String> = HashMap::new();
+        tracer.inject_into_text_map(span_context, &mut text_map);
+        let extracted_span_context = tracer.extract_from_text_map(&text_map).unwrap();
+        assert_span_context_eq(span_context, &extracted_span_context);
+    }
+
+    #[test]
+    fn test_binary_inject_and_extract() {
+        let tracer = LightStepTracer::new();
+        let span = tracer.span("foo").start();
+        let span_context = span.span_context();
+        let binary = tracer.inject_into_binary(span_context);
+        let extracted_span_context = tracer.extract_from_binary(&binary).unwrap();
+        assert_span_context_eq(span_context, &extracted_span_context);
     }
 }
