@@ -44,6 +44,15 @@ impl LightStepSpanContextState {
             span_id: rand::thread_rng().gen(),
         }
     }
+
+    fn from_trait_object(
+        span_context_state: &Box<dyn SpanContextState>,
+    ) -> &LightStepSpanContextState {
+        span_context_state
+            .as_any()
+            .downcast_ref::<Self>()
+            .expect("SpanContextState created with different Tracer")
+    }
 }
 
 impl SpanContextState for LightStepSpanContextState {
@@ -511,13 +520,9 @@ impl Tracer for LightStepTracer {
             //
             // Downcasting could break, if someone passes a span context created from a different
             // tracer but that seems unlikely.
-            state.trace_id = options.references[0]
-                .to
-                .state
-                .as_any()
-                .downcast_ref::<LightStepSpanContextState>()
-                .expect("Span references SpanContext created with a different Tracer")
-                .trace_id;
+            state.trace_id =
+                LightStepSpanContextState::from_trait_object(&options.references[0].to.state)
+                    .trace_id;
         }
         Span::new(
             SpanContext::new(Box::new(state)),
@@ -527,11 +532,7 @@ impl Tracer for LightStepTracer {
     }
 
     fn inject_into_text_map(&self, span_context: &SpanContext, carrier: &mut dyn CarrierMap) {
-        let state = span_context
-            .state
-            .as_any()
-            .downcast_ref::<LightStepSpanContextState>()
-            .expect("SpanContext created with different Tracer");
+        let state = LightStepSpanContextState::from_trait_object(&span_context.state);
 
         carrier.set(TEXT_MAP_TRACE_ID_FIELD, &format!("{:x}", state.trace_id));
         carrier.set(TEXT_MAP_SPAN_ID_FIELD, &format!("{:x}", state.span_id));
@@ -599,11 +600,7 @@ impl Tracer for LightStepTracer {
     }
 
     fn inject_into_binary(&self, span_context: &SpanContext) -> Vec<u8> {
-        let state = span_context
-            .state
-            .as_any()
-            .downcast_ref::<LightStepSpanContextState>()
-            .expect("SpanContext created with different Tracer");
+        let state = LightStepSpanContextState::from_trait_object(&span_context.state);
         let carrier = carrier::BinaryCarrier {
             deprecated_text_ctx: vec![],
             basic_ctx: Some(carrier::BasicTracerCarrier {
