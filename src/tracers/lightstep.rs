@@ -147,10 +147,11 @@ impl LightStepReporter {
                 .timeout(config_for_thread.send_timeout)
                 .default_headers(headers)
                 .build()
-                .expect("LightStepReporter reqwest::blocking::Client creation failed");
+                .expect("BUG: LightStepReporter reqwest::blocking::Client creation failed");
             while is_running_for_thread.load(Ordering::SeqCst) {
                 let mut spans = Vec::with_capacity(config_for_thread.buffer_size);
                 {
+                    // If the lock is poisoned, we cannot continue so we might just as well panic.
                     let mut current_finished_spans = finished_spans_for_thread
                         .lock()
                         .expect("LightStepReporter.finished_spans RwLock poisoned");
@@ -193,12 +194,15 @@ impl LightStepReporter {
     }
 
     fn has_pending_spans(&self) -> bool {
-        let has_buffered_spans = self
-            .finished_spans
-            .lock()
-            .expect("LightStepReporter.finished_spans RwLock poisoned")
-            .len()
-            > 0;
+        let has_buffered_spans = match self.finished_spans.lock() {
+            Ok(finished_spans) => finished_spans.len() > 0,
+            Err(_) => {
+                // This can only happen, if for whatever reason the reporter thread panicked while
+                // it held the lock. Any spans that might have been pending at that point won't be
+                // send anymore now. So we default to...
+                false
+            }
+        };
         let is_sending = self.is_sending.load(Ordering::SeqCst);
         has_buffered_spans || is_sending
     }
@@ -245,7 +249,7 @@ fn create_report_request_body(
     let mut body = Vec::with_capacity(request.encoded_len());
     request
         .encode(&mut body)
-        .expect("Buffer for ReportRequest has insufficient capacity");
+        .expect("BUG: Buffer for ReportRequest has insufficient capacity");
     body
 }
 
@@ -371,16 +375,17 @@ fn serialize_log_entry((timestamp, events): (SystemTime, Vec<Event>)) -> collect
 
 impl Reporter for LightStepReporter {
     fn report(&self, finished_span: FinishedSpan) {
-        let mut finished_spans = self
-            .finished_spans
-            .lock()
-            .expect("LightStepReporter.finished_spans Mutex poisoned");
-
-        if finished_spans.len() > self.config.buffer_size {
+        if let Ok(mut finished_spans) = self.finished_spans.lock() {
+            if finished_spans.len() >= self.config.buffer_size {
+                // We've reached the buffer size, let's drop this span.
+                self.dropped_spans.fetch_add(1, Ordering::SeqCst);
+            } else {
+                finished_spans.push(finished_span);
+            }
+        } else {
+            // The thread panicked so this span gets dropped.
             self.dropped_spans.fetch_add(1, Ordering::SeqCst);
-            return;
         }
-        finished_spans.push(finished_span);
     }
 }
 
