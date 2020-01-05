@@ -8,8 +8,8 @@ use reqwest::blocking::ClientBuilder as ReqwestClientBuilder;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::convert::TryInto;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex, Weak};
 use std::time::{Duration, SystemTime};
 
 /// Generated code based on lightstep-tracer-common/collector.proto
@@ -103,14 +103,19 @@ struct LightStepReporter {
     finished_spans: Arc<Mutex<Vec<FinishedSpan>>>,
     join_handle: std::thread::JoinHandle<()>,
     dropped_spans: AtomicUsize,
+    is_running: Weak<AtomicBool>,
 }
 
 impl LightStepReporter {
     fn new(config: LightStepConfig) -> Self {
         let finished_spans = Arc::new(Mutex::new(Vec::with_capacity(config.buffer_size)));
+        let finished_spans_for_thread = finished_spans.clone();
 
         let config_for_thread = config.clone();
-        let finished_spans_for_thread = finished_spans.clone();
+
+        let is_running_for_thread = Arc::new(AtomicBool::new(true));
+        let is_running = Arc::downgrade(&is_running_for_thread);
+
         let join_handle = std::thread::spawn(move || {
             let reporter = create_reporter(&config_for_thread);
 
@@ -139,7 +144,7 @@ impl LightStepReporter {
                 .default_headers(headers)
                 .build()
                 .expect("LightStepReporter reqwest::blocking::Client creation failed");
-            loop {
+            while is_running_for_thread.load(Ordering::SeqCst) {
                 let mut spans = Vec::with_capacity(config_for_thread.buffer_size);
                 {
                     let mut current_finished_spans = finished_spans_for_thread
@@ -167,6 +172,14 @@ impl LightStepReporter {
             finished_spans: finished_spans,
             join_handle,
             dropped_spans: AtomicUsize::new(0),
+            is_running,
+        }
+    }
+
+    fn is_running(&self) -> bool {
+        match self.is_running.upgrade() {
+            Some(b) => b.load(Ordering::SeqCst),
+            None => false,
         }
     }
 }
