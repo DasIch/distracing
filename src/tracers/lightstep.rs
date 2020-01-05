@@ -684,6 +684,12 @@ impl Tracer for LightStepTracer {
                 .collect(),
         })
     }
+
+    fn flush(&self) {
+        while self.reporter.is_running() && self.reporter.has_pending_spans() {
+            std::thread::sleep(self.reporter.config.send_period);
+        }
+    }
 }
 
 #[cfg(test)]
