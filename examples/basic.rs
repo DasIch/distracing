@@ -1,12 +1,12 @@
 #[macro_use]
 extern crate log;
 
-use distracing::Event;
+use distracing::{Event, Tracer};
 
 fn main() {
     env_logger::init();
     info!("Start");
-    let tracer = distracing::LightStepTracer::build()
+    let lightstep_tracer = distracing::LightStepTracer::build()
         .component_name("distracing-dev")
         .collector_host("tracing.stups.zalan.do")
         .collector_port(8443)
@@ -15,7 +15,7 @@ fn main() {
                 .expect("LIGHTSTEP_ACCESS_TOKEN environment variable not found"),
         )
         .build();
-    distracing::set_tracer(tracer);
+    distracing::set_tracer(lightstep_tracer.clone());
     {
         let foo = distracing::tracer()
             .span("foo")
@@ -30,5 +30,5 @@ fn main() {
             bar.log(&[Event::new("is_frobnicating", true)]);
         }
     }
-    std::thread::sleep(std::time::Duration::from_secs(5));
+    lightstep_tracer.flush();
 }
