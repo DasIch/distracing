@@ -389,16 +389,32 @@ impl Reporter for LightStepReporter {
     }
 }
 
+/// A tracer that sends finished spans to a [LightStep](https://lightstep.com/) collector.
 #[derive(Clone, Debug)]
 pub struct LightStepTracer {
     reporter: Arc<LightStepReporter>,
 }
 
 impl LightStepTracer {
+    #[doc(hidden)]
     pub fn new() -> Self {
         Self::build().build()
     }
 
+    /// Create an instance of the LightStep tracer.
+    ///
+    /// Example:
+    ///
+    /// ```rust
+    /// distracing::set_tracer(LightStepTracer::build()
+    ///     .access_token("<your-lightstep-access-token")
+    ///     .component_name("my-application")
+    ///     .tag("team", "my-team")
+    ///     .build()
+    /// )
+    /// ```
+    ///
+    /// Further options are documented as part of the `LightStepConfig` struct.
     pub fn build() -> LightStepConfig {
         LightStepConfig::new()
     }
@@ -445,26 +461,41 @@ impl LightStepConfig {
         }
     }
 
+    /// Sets the LightStep access token for your collector.
     pub fn access_token<S: Into<String>>(&mut self, access_token: S) -> &mut Self {
         self.access_token = Some(access_token.into());
         self
     }
 
+    /// Sets the component name.
     pub fn component_name<S: Into<String>>(&mut self, component_name: S) -> &mut Self {
         self.component_name = Some(component_name.into());
         self
     }
 
+    /// Add a global tag that applies to all spans.
+    ///
+    /// Tags set this way will show up in the "Additional Details" section
+    /// of the trace view.
     pub fn tag<K: Into<Key>, V: Into<Value>>(&mut self, key: K, value: V) -> &mut Self {
         self.tags.insert(key.into(), value.into());
         self
     }
 
+    /// Specify the hostname of the collector you are using.
+    ///
+    /// Default: `collector.lightstep.com`.
     pub fn collector_host<S: Into<String>>(&mut self, collector_host: S) -> &mut Self {
         self.collector_host = collector_host.into();
         self
     }
 
+    /// Specify the port of the collector you are using.
+    ///
+    /// This implementation uses Protocol Buffers over HTTP, so you should use
+    /// the port corresponding to that.
+    ///
+    /// Default: 443
     pub fn collector_port(&mut self, collector_port: usize) -> &mut Self {
         self.collector_port = collector_port;
         self
@@ -477,11 +508,20 @@ impl LightStepConfig {
         )
     }
 
+    /// Finished spans are buffered in memory and send in batches to the
+    /// collector. This sets the size of that buffer in the number of spans.
+    ///
+    /// Default: 1000
     pub fn buffer_size(&mut self, buffer_size: usize) -> &mut Self {
         self.buffer_size = buffer_size;
         self
     }
 
+    /// Finished spans are buffered in memory and send in batches to the
+    /// collector periodically. This sets the duration for which the tracer
+    /// sleeps inbetween sending spans.
+    ///
+    /// Default: 2.5s
     pub fn send_period(&mut self, send_period: Duration) -> &mut Self {
         self.send_period = send_period;
         self

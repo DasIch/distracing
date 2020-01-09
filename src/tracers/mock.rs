@@ -19,6 +19,11 @@ impl Reporter for MockReporter {
     }
 }
 
+/// A tracer that collects all finished spans. This is intended to be used for
+/// testing your instrumentation.
+///
+/// You should *not* use this tracer outside of tests as all finished spans
+/// will be kept in memory and so you essentially end up with a memory leak.
 #[derive(Clone, Debug)]
 pub struct MockTracer {
     reporter: Arc<MockReporter>,
@@ -33,6 +38,7 @@ impl MockTracer {
         }
     }
 
+    /// Returns the finished spans.
     pub fn finished_spans(&self) -> std::sync::RwLockReadGuard<'_, std::vec::Vec<FinishedSpan>> {
         self.reporter
             .finished_spans
@@ -42,7 +48,7 @@ impl MockTracer {
 }
 
 #[derive(Clone, Debug)]
-pub struct MockSpanContextState {}
+struct MockSpanContextState {}
 
 impl SpanContextState for MockSpanContextState {
     fn as_any(&self) -> &dyn std::any::Any {

@@ -11,6 +11,7 @@ impl Reporter for NoopReporter {
     fn report(&self, _finished_span: FinishedSpan) {}
 }
 
+/// A tracer that does nothing at all.
 #[derive(Clone, Debug)]
 pub struct NoopTracer {
     reporter: Arc<NoopReporter>,
@@ -25,7 +26,7 @@ impl NoopTracer {
 }
 
 #[derive(Clone, Debug)]
-pub struct NoopSpanContextState {}
+struct NoopSpanContextState {}
 
 impl SpanContextState for NoopSpanContextState {
     fn as_any(&self) -> &dyn std::any::Any {
