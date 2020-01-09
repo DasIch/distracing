@@ -1,4 +1,4 @@
-# DisTracing
+# Distracing
 
 An OpenTracing library written in Rust.
 
