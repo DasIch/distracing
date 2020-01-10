@@ -23,3 +23,11 @@ jobs:
       run: cargo build --all-features --verbose
     - name: Run tests
       run: cargo test --all-features --verbose
+    - name: Setup go
+      uses: actions/setup-go@v1
+      with:
+        go-version: 1.13.x
+    - name: Install LightStep Conformance Runner
+      run: go get -u github.com/lightstep/lightstep-tracer-go github.com/opentracing/opentracing-go github.com/lightstep/conformance/ls_conformance_runner
+    - name: Run LightStep Carrier Conformance Test
+      run: $(go env GOPATH)/bin/ls_conformance_runner cargo run --features lightstep --example lightstep_conformance
