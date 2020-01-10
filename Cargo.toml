@@ -1,7 +1,10 @@
 [package]
 name = "distracing"
+description = "OpenTracing library"
+license = "MIT"
 version = "0.1.0"
 authors = ["Daniel Neuhäuser <daniel.neuhaeuser@zalando.de>"]
+repository = "https://github.com/DasIch/distracing"
 edition = "2018"
 build = "build.rs"
 
