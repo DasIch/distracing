@@ -270,8 +270,9 @@ impl Span {
     /// Example:
     ///
     /// ```rust
+    /// # use distracing::Event;
+    /// # let mut span = distracing::tracer().span("foo").start();
     /// span.log(&[Event::new("key", "value"), Event::new("bla", 123)]);
-    ///
     /// ```
     pub fn log(&mut self, events: &[Event]) {
         self.log_with_timestamp(events, SystemTime::now());
