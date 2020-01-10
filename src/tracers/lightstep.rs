@@ -699,18 +699,11 @@ impl Tracer for LightStepTracer {
         // Ignore the result because the only possible failure is the buffer running out of
         // capacity and it's not like that is going to happen.
         let _ = carrier.encode(&mut buffer);
-        buffer
+        base64::encode(&buffer).as_bytes().to_vec()
     }
 
     fn extract_from_binary(&self, carrier: &[u8]) -> Result<SpanContext, SpanContextCorrupted> {
-        let carrier = match carrier::BinaryCarrier::decode(carrier) {
-            Ok(c) => c,
-            Err(err) => {
-                return Err(SpanContextCorrupted {
-                    message: format!("{}", err),
-                })
-            }
-        };
+        let carrier = carrier::BinaryCarrier::decode(base64::decode(carrier)?)?;
         let basic_ctx = match carrier.basic_ctx {
             Some(basic_ctx) => basic_ctx,
             None => {
@@ -735,6 +728,22 @@ impl Tracer for LightStepTracer {
     fn flush(&self) {
         while self.reporter.is_running() && self.reporter.has_pending_spans() {
             std::thread::sleep(self.reporter.config.send_period);
+        }
+    }
+}
+
+impl From<base64::DecodeError> for SpanContextCorrupted {
+    fn from(err: base64::DecodeError) -> Self {
+        Self {
+            message: format!("{}", err),
+        }
+    }
+}
+
+impl From<prost::DecodeError> for SpanContextCorrupted {
+    fn from(err: prost::DecodeError) -> Self {
+        Self {
+            message: format!("{}", err),
         }
     }
 }
