@@ -1,3 +1,4 @@
+#![allow(clippy::blacklisted_name)]
 #[macro_use]
 extern crate log;
 

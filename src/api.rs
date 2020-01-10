@@ -473,9 +473,9 @@ pub trait CarrierMap {
     fn set(&mut self, key: &str, value: &str);
 }
 
-impl CarrierMap for HashMap<String, String> {
+impl<S: ::std::hash::BuildHasher> CarrierMap for HashMap<String, String, S> {
     fn keys<'a>(&'a self) -> Box<dyn Iterator<Item = String> + 'a> {
-        Box::new(self.keys().map(|k| k.clone()))
+        Box::new(self.keys().cloned())
     }
 
     fn get(&self, key: &str) -> Option<&str> {

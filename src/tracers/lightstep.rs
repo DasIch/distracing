@@ -45,6 +45,7 @@ impl LightStepSpanContextState {
         }
     }
 
+    #[allow(clippy::borrowed_box)]
     fn from_trait_object(
         span_context_state: &Box<dyn SpanContextState>,
     ) -> &LightStepSpanContextState {
@@ -133,7 +134,7 @@ impl LightStepReporter {
             let access_token = config_for_thread
                 .access_token
                 .clone()
-                .unwrap_or("".to_string());
+                .unwrap_or_else(|| "".to_string());
             let auth = Some(collector::Auth {
                 access_token: access_token.clone(),
             });
@@ -156,11 +157,11 @@ impl LightStepReporter {
                         .lock()
                         .expect("LightStepReporter.finished_spans RwLock poisoned");
                     std::mem::swap(&mut spans, &mut *current_finished_spans);
-                    if spans.len() > 0 {
+                    if !spans.is_empty() {
                         is_sending_for_thread.store(true, Ordering::SeqCst);
                     }
                 }
-                if spans.len() > 0 {
+                if !spans.is_empty() {
                     let response =
                         perform_report_request(&client, &collector_url, &reporter, &auth, spans);
                     match response {
@@ -178,7 +179,7 @@ impl LightStepReporter {
         });
         LightStepReporter {
             config,
-            finished_spans: finished_spans,
+            finished_spans,
             join_handle,
             dropped_spans: AtomicUsize::new(0),
             is_running,
@@ -591,7 +592,7 @@ impl Tracer for LightStepTracer {
 
     fn span_with_options(&self, options: SpanOptions) -> Span {
         let mut state = LightStepSpanContextState::new();
-        if options.references.len() > 0 {
+        if !options.references.is_empty() {
             // Unfortunately multiple references won't really work out :/ At least the Python
             // LightStep tracer has the same problem and it's not clear to me how we might be able
             // to address this.
@@ -657,12 +658,12 @@ impl Tracer for LightStepTracer {
             }
         }
 
-        if let None = trace_id {
+        if trace_id.is_none() {
             return Err(SpanContextCorrupted {
                 message: format!("{} is missing", TEXT_MAP_TRACE_ID_FIELD),
             });
         }
-        if let None = span_id {
+        if span_id.is_none() {
             return Err(SpanContextCorrupted {
                 message: format!("{} is missing", TEXT_MAP_SPAN_ID_FIELD),
             });
