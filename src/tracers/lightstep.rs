@@ -407,6 +407,7 @@ impl LightStepTracer {
     /// Example:
     ///
     /// ```rust
+    /// # use distracing::LightStepTracer;
     /// distracing::set_tracer(LightStepTracer::build()
     ///     .access_token("<your-lightstep-access-token")
     ///     .component_name("my-application")
