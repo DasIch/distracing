@@ -201,22 +201,18 @@ impl Tracer for LightStepTracer {
 
     fn span_with_options(&self, options: SpanOptions) -> Span {
         let mut state = LightStepSpanContextState::new();
-        if !options.references.is_empty() {
-            // Unfortunately multiple references won't really work out :/ At least the Python
-            // LightStep tracer has the same problem and it's not clear to me how we might be able
-            // to address this.
-            //
-            // Downcasting could break, if someone passes a span context created from a different
-            // tracer but that seems unlikely.
-            state.trace_id =
-                LightStepSpanContextState::from_trait_object(&options.references[0].to.state)
-                    .trace_id;
-        }
-        Span::new(
-            SpanContext::new(Box::new(state)),
-            self.reporter.clone(),
-            options,
-        )
+        let span_context = if !options.references.is_empty() {
+            let parent_span_context = &options.references[0].to;
+            let parent_state =
+                LightStepSpanContextState::from_trait_object(&parent_span_context.state);
+            state.trace_id = parent_state.trace_id;
+            let mut span_context = SpanContext::new(Box::new(state));
+            span_context.baggage_items = parent_span_context.baggage_items.clone();
+            span_context
+        } else {
+            SpanContext::new(Box::new(state))
+        };
+        Span::new(span_context, self.reporter.clone(), options)
     }
 
     fn inject_into_text_map(&self, span_context: &SpanContext, carrier: &mut dyn CarrierMap) {
@@ -361,6 +357,24 @@ mod tests {
     use super::{LightStepSpanContextState, LightStepTracer};
     use crate::api::{SpanContext, Tracer};
     use std::collections::HashMap;
+
+    #[test]
+    fn test_child_span_inherits_from_parent_span() {
+        let tracer = LightStepTracer::new();
+        let mut parent_span = tracer.span("parent").start();
+        parent_span.set_baggage_item("baggage", "item");
+        let child_span = tracer
+            .span("child")
+            .child_of(parent_span.span_context())
+            .start();
+        assert_eq!(child_span.baggage_item("baggage"), Some("item"));
+
+        let parent_state =
+            LightStepSpanContextState::from_trait_object(&parent_span.span_context().state);
+        let child_state =
+            LightStepSpanContextState::from_trait_object(&child_span.span_context().state);
+        assert_eq!(parent_state.trace_id, child_state.trace_id);
+    }
 
     fn assert_span_context_eq(a: &SpanContext, b: &SpanContext) {
         assert_eq!(a.baggage_items, b.baggage_items);
