@@ -22,6 +22,7 @@ const TEXT_MAP_PREFIX_BAGGAGE: &str = "ot-baggage-";
 struct LightStepSpanContextState {
     trace_id: u64,
     span_id: u64,
+    sampled: bool,
 }
 
 impl LightStepSpanContextState {
@@ -30,6 +31,7 @@ impl LightStepSpanContextState {
         LightStepSpanContextState {
             trace_id: rand::thread_rng().gen(),
             span_id: rand::thread_rng().gen(),
+            sampled: true,
         }
     }
 
@@ -206,6 +208,7 @@ impl Tracer for LightStepTracer {
             let parent_state =
                 LightStepSpanContextState::from_trait_object(&parent_span_context.state);
             state.trace_id = parent_state.trace_id;
+            state.sampled = parent_state.sampled;
             let mut span_context = SpanContext::new(Box::new(state));
             span_context.baggage_items = parent_span_context.baggage_items.clone();
             span_context
@@ -220,7 +223,7 @@ impl Tracer for LightStepTracer {
 
         carrier.set(TEXT_MAP_TRACE_ID_FIELD, &format!("{:x}", state.trace_id));
         carrier.set(TEXT_MAP_SPAN_ID_FIELD, &format!("{:x}", state.span_id));
-        carrier.set(TEXT_MAP_SAMPLED_FIELD, "false");
+        carrier.set(TEXT_MAP_SAMPLED_FIELD, &format!("{}", state.sampled));
     }
 
     fn extract_from_text_map(
@@ -229,6 +232,7 @@ impl Tracer for LightStepTracer {
     ) -> Result<SpanContext, SpanContextCorrupted> {
         let mut trace_id: Option<u64> = None;
         let mut span_id: Option<u64> = None;
+        let mut sampled: Option<bool> = None;
         let mut baggage_items: HashMap<Cow<'static, str>, String> = HashMap::new();
 
         for key in carrier.keys() {
@@ -253,6 +257,16 @@ impl Tracer for LightStepTracer {
                         })
                     }
                 };
+            } else if key == TEXT_MAP_SAMPLED_FIELD {
+                match carrier.get(&key).unwrap() {
+                    "true" => sampled = Some(true),
+                    "false" => sampled = Some(false),
+                    _ => {
+                        return Err(SpanContextCorrupted {
+                            message: format!("{} is not a valid boolean", TEXT_MAP_SAMPLED_FIELD),
+                        })
+                    }
+                }
             } else if key.starts_with(TEXT_MAP_PREFIX_BAGGAGE) {
                 let baggage_key = &key[TEXT_MAP_PREFIX_BAGGAGE.len()..];
                 let baggage_value = carrier.get(baggage_key).unwrap();
@@ -273,11 +287,17 @@ impl Tracer for LightStepTracer {
                 message: format!("{} is missing", TEXT_MAP_SPAN_ID_FIELD),
             });
         }
+        if sampled.is_none() {
+            return Err(SpanContextCorrupted {
+                message: format!("{} is missing", TEXT_MAP_SAMPLED_FIELD),
+            });
+        }
 
         Ok(SpanContext {
             state: Box::new(LightStepSpanContextState {
                 trace_id: trace_id.unwrap(),
                 span_id: span_id.unwrap(),
+                sampled: sampled.unwrap(),
             }),
             baggage_items,
         })
@@ -290,7 +310,7 @@ impl Tracer for LightStepTracer {
             basic_ctx: Some(carrier::BasicTracerCarrier {
                 trace_id: state.trace_id,
                 span_id: state.span_id,
-                sampled: false,
+                sampled: state.sampled,
                 baggage_items: span_context
                     .baggage_items
                     .clone()
@@ -320,6 +340,7 @@ impl Tracer for LightStepTracer {
             state: Box::new(LightStepSpanContextState {
                 trace_id: basic_ctx.trace_id,
                 span_id: basic_ctx.span_id,
+                sampled: basic_ctx.sampled,
             }),
             baggage_items: basic_ctx
                 .baggage_items
@@ -374,6 +395,20 @@ mod tests {
         let child_state =
             LightStepSpanContextState::from_trait_object(&child_span.span_context().state);
         assert_eq!(parent_state.trace_id, child_state.trace_id);
+    }
+
+    #[test]
+    fn test_sampled_is_inherited() {
+        let tracer = LightStepTracer::new();
+        for expected_sampled in [true, false].iter() {
+            let mut parent_state = LightStepSpanContextState::new();
+            parent_state.sampled = *expected_sampled;
+            let parent_span_context = SpanContext::new(Box::new(parent_state));
+            let child_span = tracer.span("child").child_of(&parent_span_context).start();
+            let child_state =
+                LightStepSpanContextState::from_trait_object(&child_span.span_context().state);
+            assert_eq!(child_state.sampled, *expected_sampled);
+        }
     }
 
     fn assert_span_context_eq(a: &SpanContext, b: &SpanContext) {
