@@ -368,6 +368,12 @@ mod tests {
             .child_of(parent_span.span_context())
             .start();
         assert_eq!(child_span.baggage_item("baggage"), Some("item"));
+
+        let parent_state =
+            LightStepSpanContextState::from_trait_object(&parent_span.span_context().state);
+        let child_state =
+            LightStepSpanContextState::from_trait_object(&child_span.span_context().state);
+        assert_eq!(parent_state.trace_id, child_state.trace_id);
     }
 
     fn assert_span_context_eq(a: &SpanContext, b: &SpanContext) {
