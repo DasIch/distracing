@@ -15,25 +15,25 @@ build = "build.rs"
 lightstep = ["prost", "prost-types", "bytes", "prost-build", "rand", "reqwest", "log", "base64"]
 
 [dependencies]
-lazy_static = { version = "1.4.0" }
+lazy_static = { version = "1.4" }
 
-prost = { version = "0.5.0", optional = true }
-bytes = { version = "0.4.0", optional = true }
-prost-types = { version = "0.5.0", optional = true }
+prost = { version = "0.5", optional = true }
+bytes = { version = "0.4", optional = true }
+prost-types = { version = "0.5", optional = true }
 rand = { version = "0.7", optional = true }
 reqwest = { version = "0.10", features = ["blocking"], optional = true }
 log = { version = "0.4", optional = true }
-base64 = { version = "0.11.0", optional = true }
+base64 = { version = "0.11", optional = true }
 
 [build-dependencies]
-prost-build = { version = "0.5.0", optional = true }
+prost-build = { version = "0.5", optional = true }
 
 [dev-dependencies]
 # Used in examples
-env_logger = { version = "0.7.1" }
+env_logger = { version = "0.7" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0" }
-base64 = { version = "0.11.0" }
+base64 = { version = "0.11" }
 
 [[example]]
 name = "basic"
