@@ -1,7 +1,5 @@
-use crate::api::{
-    CarrierMap, FinishedSpan, Reporter, Span, SpanBuilder, SpanContext, SpanContextCorrupted,
-    SpanContextState, SpanOptions, Tracer,
-};
+use crate::span::{FinishedSpan, Reporter, Span, SpanContext, SpanContextState, SpanOptions};
+use crate::tracer::{CarrierMap, SpanBuilder, SpanContextCorrupted, Tracer};
 use std::sync::Arc;
 
 #[derive(Debug)]

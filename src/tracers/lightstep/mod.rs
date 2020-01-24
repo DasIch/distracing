@@ -1,10 +1,8 @@
 mod proto;
 mod reporter;
 
-use crate::api::{
-    CarrierMap, Key, Span, SpanBuilder, SpanContext, SpanContextCorrupted, SpanContextState,
-    SpanOptions, Tracer, Value,
-};
+use crate::span::{Key, Span, SpanContext, SpanContextState, SpanOptions, Value};
+use crate::tracer::{CarrierMap, SpanBuilder, SpanContextCorrupted, Tracer};
 use prost::Message;
 use proto::carrier;
 use reporter::LightStepReporter;
@@ -376,7 +374,8 @@ impl From<prost::DecodeError> for SpanContextCorrupted {
 #[cfg(test)]
 mod tests {
     use super::{LightStepSpanContextState, LightStepTracer};
-    use crate::api::{SpanContext, Tracer};
+    use crate::span::SpanContext;
+    use crate::tracer::Tracer;
     use std::collections::HashMap;
 
     #[test]

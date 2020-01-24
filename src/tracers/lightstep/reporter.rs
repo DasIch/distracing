@@ -1,5 +1,5 @@
 use super::proto::collector;
-use crate::api::{FinishedSpan, Reporter};
+use crate::span::{FinishedSpan, Reporter};
 use log::{error, info, warn};
 use prost::Message;
 use reqwest::blocking::ClientBuilder as ReqwestClientBuilder;

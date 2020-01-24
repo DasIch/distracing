@@ -1,4 +1,4 @@
-use crate::api;
+use crate::span;
 use std::convert::TryInto;
 use std::time::SystemTime;
 
@@ -12,8 +12,8 @@ pub mod carrier {
     include!(concat!(env!("OUT_DIR"), "/lightstep.rs"));
 }
 
-impl From<api::SpanContext> for collector::SpanContext {
-    fn from(span_context: api::SpanContext) -> collector::SpanContext {
+impl From<span::SpanContext> for collector::SpanContext {
+    fn from(span_context: span::SpanContext) -> collector::SpanContext {
         // The unwrap is safe under the assumption that this is only called on Spans created by the
         // LightStepTracer. As long as nobody makes this function `pub` this should be a reasonable
         // assumption.
@@ -34,11 +34,11 @@ impl From<api::SpanContext> for collector::SpanContext {
     }
 }
 
-impl From<api::Reference> for collector::Reference {
-    fn from(reference: api::Reference) -> collector::Reference {
+impl From<span::Reference> for collector::Reference {
+    fn from(reference: span::Reference) -> collector::Reference {
         let relationship = match reference.rtype {
-            api::ReferenceType::ChildOf => collector::reference::Relationship::ChildOf,
-            api::ReferenceType::FollowsFrom => collector::reference::Relationship::FollowsFrom,
+            span::ReferenceType::ChildOf => collector::reference::Relationship::ChildOf,
+            span::ReferenceType::FollowsFrom => collector::reference::Relationship::FollowsFrom,
         };
         collector::Reference {
             // for some reason this is stored as an i32 ¯\_(ツ)_/¯
@@ -48,26 +48,26 @@ impl From<api::Reference> for collector::Reference {
     }
 }
 
-impl From<api::Value> for collector::key_value::Value {
-    fn from(value: api::Value) -> collector::key_value::Value {
+impl From<span::Value> for collector::key_value::Value {
+    fn from(value: span::Value) -> collector::key_value::Value {
         use collector::key_value;
         match value {
-            api::Value::String(s) => key_value::Value::StringValue(s),
-            api::Value::Bool(b) => key_value::Value::BoolValue(b),
-            api::Value::F32(n) => key_value::Value::DoubleValue(n as f64),
-            api::Value::F64(n) => key_value::Value::DoubleValue(n),
-            api::Value::U8(n) => serialize_numeric_to_value(n),
-            api::Value::U16(n) => serialize_numeric_to_value(n),
-            api::Value::U32(n) => serialize_numeric_to_value(n),
-            api::Value::U64(n) => serialize_numeric_to_value(n),
-            api::Value::U128(n) => serialize_numeric_to_value(n),
-            api::Value::I8(n) => serialize_numeric_to_value(n),
-            api::Value::I16(n) => serialize_numeric_to_value(n),
-            api::Value::I32(n) => serialize_numeric_to_value(n),
-            api::Value::I64(n) => serialize_numeric_to_value(n),
-            api::Value::I128(n) => serialize_numeric_to_value(n),
-            api::Value::USize(n) => serialize_numeric_to_value(n),
-            api::Value::ISize(n) => serialize_numeric_to_value(n),
+            span::Value::String(s) => key_value::Value::StringValue(s),
+            span::Value::Bool(b) => key_value::Value::BoolValue(b),
+            span::Value::F32(n) => key_value::Value::DoubleValue(n as f64),
+            span::Value::F64(n) => key_value::Value::DoubleValue(n),
+            span::Value::U8(n) => serialize_numeric_to_value(n),
+            span::Value::U16(n) => serialize_numeric_to_value(n),
+            span::Value::U32(n) => serialize_numeric_to_value(n),
+            span::Value::U64(n) => serialize_numeric_to_value(n),
+            span::Value::U128(n) => serialize_numeric_to_value(n),
+            span::Value::I8(n) => serialize_numeric_to_value(n),
+            span::Value::I16(n) => serialize_numeric_to_value(n),
+            span::Value::I32(n) => serialize_numeric_to_value(n),
+            span::Value::I64(n) => serialize_numeric_to_value(n),
+            span::Value::I128(n) => serialize_numeric_to_value(n),
+            span::Value::USize(n) => serialize_numeric_to_value(n),
+            span::Value::ISize(n) => serialize_numeric_to_value(n),
         }
     }
 }
@@ -81,8 +81,8 @@ fn serialize_numeric_to_value<N: Copy + TryInto<i64> + std::string::ToString>(
     }
 }
 
-impl From<(api::Key, api::Value)> for collector::KeyValue {
-    fn from((key, value): (api::Key, api::Value)) -> collector::KeyValue {
+impl From<(span::Key, span::Value)> for collector::KeyValue {
+    fn from((key, value): (span::Key, span::Value)) -> collector::KeyValue {
         let key = key.into_owned();
         collector::KeyValue {
             key,
@@ -91,8 +91,8 @@ impl From<(api::Key, api::Value)> for collector::KeyValue {
     }
 }
 
-impl From<(SystemTime, Vec<api::Event>)> for collector::Log {
-    fn from((timestamp, events): (SystemTime, Vec<api::Event>)) -> collector::Log {
+impl From<(SystemTime, Vec<span::Event>)> for collector::Log {
+    fn from((timestamp, events): (SystemTime, Vec<span::Event>)) -> collector::Log {
         collector::Log {
             timestamp: Some(timestamp.into()),
             fields: events
@@ -106,8 +106,8 @@ impl From<(SystemTime, Vec<api::Event>)> for collector::Log {
     }
 }
 
-impl From<api::FinishedSpan> for collector::Span {
-    fn from(span: api::FinishedSpan) -> collector::Span {
+impl From<span::FinishedSpan> for collector::Span {
+    fn from(span: span::FinishedSpan) -> collector::Span {
         // Either Span.finish or Drop.drop sets the duration. Accordingly we should be able to fairly
         // safely assume that it's set here.
         let duration = span

@@ -1,4 +1,4 @@
-use crate::api::Tracer;
+use crate::tracer::Tracer;
 use crate::tracers::noop::NoopTracer;
 use std::sync::{Arc, RwLock};
 
