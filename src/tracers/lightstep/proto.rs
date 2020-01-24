@@ -25,11 +25,7 @@ impl From<span::SpanContext> for collector::SpanContext {
         collector::SpanContext {
             trace_id: state.trace_id,
             span_id: state.span_id,
-            baggage: span_context
-                .baggage_items
-                .into_iter()
-                .map(|(k, v)| (k.into_owned(), v))
-                .collect(),
+            baggage: span_context.baggage_items.clone(),
         }
     }
 }
@@ -83,7 +79,7 @@ fn serialize_numeric_to_value<N: Copy + TryInto<i64> + std::string::ToString>(
 
 impl From<(span::Key, span::Value)> for collector::KeyValue {
     fn from((key, value): (span::Key, span::Value)) -> collector::KeyValue {
-        let key = key.into_owned();
+        let key = key;
         collector::KeyValue {
             key,
             value: Some(value.into()),
@@ -98,7 +94,7 @@ impl From<(SystemTime, Vec<span::Event>)> for collector::Log {
             fields: events
                 .into_iter()
                 .map(|e| collector::KeyValue {
-                    key: e.key.into_owned(),
+                    key: e.key,
                     value: Some(e.value.into()),
                 })
                 .collect(),

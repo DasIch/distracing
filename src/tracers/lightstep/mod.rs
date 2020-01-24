@@ -6,7 +6,6 @@ use crate::tracer::{CarrierMap, SpanBuilder, SpanContextCorrupted, Tracer};
 use prost::Message;
 use proto::carrier;
 use reporter::LightStepReporter;
-use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -231,7 +230,7 @@ impl Tracer for LightStepTracer {
         let mut trace_id: Option<u64> = None;
         let mut span_id: Option<u64> = None;
         let mut sampled: Option<bool> = None;
-        let mut baggage_items: HashMap<Cow<'static, str>, String> = HashMap::new();
+        let mut baggage_items: HashMap<String, String> = HashMap::new();
 
         for key in carrier.keys() {
             if key == TEXT_MAP_TRACE_ID_FIELD {
@@ -268,10 +267,7 @@ impl Tracer for LightStepTracer {
             } else if key.starts_with(TEXT_MAP_PREFIX_BAGGAGE) {
                 let baggage_key = &key[TEXT_MAP_PREFIX_BAGGAGE.len()..];
                 let baggage_value = carrier.get(baggage_key).unwrap();
-                baggage_items.insert(
-                    Cow::Owned(baggage_key.to_string()),
-                    baggage_value.to_string(),
-                );
+                baggage_items.insert(baggage_key.to_string(), baggage_value.to_string());
             }
         }
 
@@ -309,12 +305,7 @@ impl Tracer for LightStepTracer {
                 trace_id: state.trace_id,
                 span_id: state.span_id,
                 sampled: state.sampled,
-                baggage_items: span_context
-                    .baggage_items
-                    .clone()
-                    .into_iter()
-                    .map(|(k, v)| (k.into_owned(), v))
-                    .collect(),
+                baggage_items: span_context.baggage_items.clone(),
             }),
         };
         let mut buffer: Vec<u8> = Vec::with_capacity(carrier.encoded_len());
@@ -340,11 +331,7 @@ impl Tracer for LightStepTracer {
                 span_id: basic_ctx.span_id,
                 sampled: basic_ctx.sampled,
             }),
-            baggage_items: basic_ctx
-                .baggage_items
-                .into_iter()
-                .map(|(k, v)| (Cow::Owned(k), v))
-                .collect(),
+            baggage_items: basic_ctx.baggage_items.clone(),
         })
     }
 

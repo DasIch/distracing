@@ -1,9 +1,8 @@
-use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
-pub type Key = Cow<'static, str>;
+pub type Key = String;
 
 #[derive(Clone, Debug)]
 pub enum Value {
